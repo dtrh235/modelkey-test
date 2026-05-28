@@ -1,0 +1,17 @@
+#ifndef APP_WIFI_POLICY_H
+#define APP_WIFI_POLICY_H
+
+#include <stdint.h>
+
+/* scr11 scan done: try up to 3 remembered APs visible in CWLAP list */
+void app_wifi_policy_on_scan_done(void);
+
+/* 1=??????????????? SSID?????? cloud ?? CWJAP */
+uint8_t app_wifi_policy_may_join_wifi(void);
+
+/* 1=????????? WiFi??STA ?? IP???????? cloud ?? MQTT */
+uint8_t app_wifi_policy_may_run_mqtt(void);
+
+uint8_t app_wifi_policy_should_rescan(void);
+
+#endif

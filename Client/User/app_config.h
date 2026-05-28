@@ -1,0 +1,120 @@
+#ifndef APP_CONFIG_H
+#define APP_CONFIG_H
+
+/*
+ * 主机 / 从机：每个固件镜像只选一种（硬件相同）。
+ * 从机：无 WiFi/阿里云 UI 流程、仅 screen_1 开锁；开锁经 RS485 通知主机，由主机 MQTT 上报阿里云。
+ * 改主机固件：将 APP_RS485_NODE_ROLE 改为 APP_RS485_ROLE_MASTER。
+ */
+#define APP_RS485_ROLE_MASTER    1u
+#define APP_RS485_ROLE_SLAVE     2u
+#define APP_RS485_NODE_ROLE      APP_RS485_ROLE_SLAVE
+
+#define APP_RS485_IS_SLAVE       ((APP_RS485_NODE_ROLE) == APP_RS485_ROLE_SLAVE)
+#define APP_RS485_IS_MASTER      ((APP_RS485_NODE_ROLE) == APP_RS485_ROLE_MASTER)
+
+#if APP_RS485_IS_SLAVE
+#define APP_CLOUD_ENABLE         0
+#define APP_ALIYUN_AT_ENABLE     0
+#else
+#define APP_CLOUD_ENABLE         1
+#define APP_ALIYUN_AT_ENABLE     1
+#endif
+
+#if APP_RS485_IS_MASTER && (APP_ALIYUN_AT_ENABLE == 1)
+#define APP_ALIYUN_PRODUCT_KEY     "k1vtgud0XCS"
+#define APP_ALIYUN_DEVICE_NAME     "1111"
+#define APP_ALIYUN_DEVICE_SECRET   "84f8b089dee226d9a7a84d7f439f2069"
+#define APP_ALIYUN_REGION          "cn-shanghai"
+#define APP_ALIYUN_WIFI_SSID       "liu"
+#define APP_ALIYUN_WIFI_PASSWORD   "ljy123456789"
+#define APP_ALIYUN_WIFI_AUTO_JOIN  1
+#define APP_ALIYUN_SNTP_ENABLE     1
+#define APP_ALIYUN_SNTP_TZ_HOURS   8
+#define APP_ALIYUN_MQTT_PASSWORD   "6DE74821026461352E60C38C45380F5F44D1A70F"
+#else
+#define APP_ALIYUN_PRODUCT_KEY     ""
+#define APP_ALIYUN_DEVICE_NAME     ""
+#define APP_ALIYUN_DEVICE_SECRET   ""
+#define APP_ALIYUN_REGION          ""
+#define APP_ALIYUN_WIFI_SSID       ""
+#define APP_ALIYUN_WIFI_PASSWORD   ""
+#define APP_ALIYUN_WIFI_AUTO_JOIN  0
+#define APP_ALIYUN_SNTP_ENABLE     0
+#define APP_ALIYUN_SNTP_TZ_HOURS   8
+#define APP_ALIYUN_MQTT_PASSWORD   ""
+#endif
+
+#define APP_NFC_ENABLE          1
+#define APP_BOOT_VTOR_RELOCATE  0
+#define APP_USE_FREERTOS        1
+
+/* RS485: USART6 PC6(TX→DI) / PC7(RX←RO) / PC8(DE+RE)。 */
+#define APP_RS485_ENABLE        1
+#define APP_RS485_UART_BAUD     115200u
+#define APP_RS485_LOCAL_ADDR    ((APP_RS485_NODE_ROLE == APP_RS485_ROLE_MASTER) ? 0x01u : 0x02u)
+#define APP_RS485_PEER_ADDR     ((APP_RS485_NODE_ROLE == APP_RS485_ROLE_MASTER) ? 0x02u : 0x01u)
+
+#ifndef APP_SLAVE_USART1_DEBUG
+#define APP_SLAVE_USART1_DEBUG 0
+#endif
+#ifndef APP_FP_SLAVE_MATCH_VIA_HOST
+#define APP_FP_SLAVE_MATCH_VIA_HOST 1
+#endif
+#ifndef APP_FP_SLAVE_MATCH_FALLBACK
+#define APP_FP_SLAVE_MATCH_FALLBACK 1
+#endif
+#ifndef APP_FP_SLAVE_MATCH_RS485_MS
+#define APP_FP_SLAVE_MATCH_RS485_MS 2000u
+#endif
+
+#ifndef APP_FP_MIRROR_DIAG
+#define APP_FP_MIRROR_DIAG       1
+#endif
+/* 0: 串口只打 NFC 刷卡诊断 + RS485 镜像/异常 + 简短启动行；1: 恢复原先冗长日志(PING/心跳/寄存器 dump 等) */
+#ifndef APP_SLAVE_LOG_VERBOSE
+#define APP_SLAVE_LOG_VERBOSE 0
+#endif
+/* 从机每轮 RS485 监听窗口（过短会导致主机 cmd no rsp） */
+#ifndef APP_RS485_SLAVE_LISTEN_MS
+#define APP_RS485_SLAVE_LISTEN_MS 150u
+#endif
+#ifndef APP_RS485_POST_TX_GAP_MS
+#define APP_RS485_POST_TX_GAP_MS 5u
+#endif
+#ifndef APP_RS485_MIRROR_BOOT_QUIET_MS
+/* 上电后先只听主机，避免 mirror_req 占用总线 */
+#define APP_RS485_MIRROR_BOOT_QUIET_MS 8000u
+#endif
+
+/* 首页 NFC/指纹轮询节奏对齐（与 app_home_unlock.c 中 NFC 一致） */
+#ifndef APP_HOME_POLL_INTERVAL_MS
+#define APP_HOME_POLL_INTERVAL_MS 200u
+#endif
+#ifndef APP_FP_BOOT_GRACE_MS
+#define APP_FP_BOOT_GRACE_MS 400u
+#endif
+#ifndef APP_FP_STA_PROBE_MS
+#define APP_FP_STA_PROBE_MS APP_HOME_POLL_INTERVAL_MS
+#endif
+#ifndef APP_FP_MATCH_SCORE_MIN
+#define APP_FP_MATCH_SCORE_MIN 60u
+#endif
+#ifndef APP_NFC_UNLOCK_CONFIRM_CNT
+#define APP_NFC_UNLOCK_CONFIRM_CNT 2u
+#endif
+#ifndef APP_FP_FINGER_STA_CONFIRM_CNT
+#define APP_FP_FINGER_STA_CONFIRM_CNT 2u
+#endif
+/* 每页 StoreChar 后避让 AS608（过短会与下一页/轮询抢模块，80ms 曾导致 page1 写失败） */
+#ifndef APP_FP_TPL_WRITE_QUIET_MS
+#define APP_FP_TPL_WRITE_QUIET_MS 220u
+#endif
+#ifndef APP_FP_TPL_WRITE_RETRY_QUIET_MS
+#define APP_FP_TPL_WRITE_RETRY_QUIET_MS 450u
+#endif
+
+#define ADMIN_DEFAULT_ACCOUNT   "1"
+#define ADMIN_DEFAULT_PASSWORD  "1111"
+
+#endif

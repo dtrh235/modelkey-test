@@ -1,0 +1,12 @@
+#ifndef APP_SCREEN6_TYPES_H
+#define APP_SCREEN6_TYPES_H
+
+typedef enum {
+    SCREEN6_DLG_NONE = 0,
+    SCREEN6_DLG_EDIT_ACC,
+    SCREEN6_DLG_EDIT_PWD,
+    SCREEN6_DLG_RESULT_OK,
+    SCREEN6_DLG_RESULT_FAIL
+} screen6_dlg_t;
+
+#endif
