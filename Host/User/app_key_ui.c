@@ -279,20 +279,19 @@ void app_key_ui_dispatch(KeyValue_t key)
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
                         users_mirror_schedule_delete(acc);
 #endif
-                        screen7_show_msgbox2();
+                        screen7_show_delete_result(1u, 1u);
                     } else if(users_try_delete_by_acc(acc)) {
-                        screen7_show_msgbox2();
+                        screen7_show_delete_result(1u, 0u);
                     } else {
-                        screen7_show_msgbox3();
+                        screen7_show_delete_result(0u, 0u);
                     }
                 } else {
-                    screen7_show_msgbox3();
+                    screen7_show_delete_result(0u, 0u);
                 }
             }
         } else if(g_screen7_msgbox_state == 2u || g_screen7_msgbox_state == 3u) {
             if(key == KEY_OK || key == KEY_ESC) {
-                screen7_hide_all_msgbox();
-                go_back_prev_screen();
+                screen7_dismiss_result_popup();
             }
         } else {
             if(key == KEY_OK) {
@@ -430,6 +429,7 @@ void app_key_ui_dispatch(KeyValue_t key)
                 screen8_popup_close_only();
                 g_nfc_op = NFC_OP_NONE;
             }
+            return;
         } else if(key == KEY_UP) {
             if(g_screen9_focus == 0u) g_screen9_focus = 1u;
             else g_screen9_focus--;

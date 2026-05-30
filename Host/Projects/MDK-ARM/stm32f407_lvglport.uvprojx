@@ -611,6 +611,11 @@
               <FilePath>..\..\User\app_wifi_diag.c</FilePath>
             </File>
             <File>
+              <FileName>app_link_guard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_link_guard.c</FilePath>
+            </File>
+            <File>
               <FileName>app_wifi_scan.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_wifi_scan.c</FilePath>

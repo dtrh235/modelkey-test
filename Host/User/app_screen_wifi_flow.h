@@ -9,6 +9,8 @@ void screen_wifi_prepare_on_enter(void);
 void screen_wifi_poll_tick(void);
 void screen_wifi_gui_wake(void);
 uint8_t screen_wifi_gui_work_pending(void);
+void screen_wifi_notify_sta_up(void);
+void screen_wifi_notify_connect_fail(void);
 uint8_t screen_wifi_popup_is_active(void);
 void screen_wifi_popup_cancel(void);
 void screen_wifi_popup_confirm(void);

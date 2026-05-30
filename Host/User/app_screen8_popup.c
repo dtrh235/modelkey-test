@@ -7,9 +7,12 @@
 #include "app_screen.h"
 #include "app_screen3_menu.h"
 #include "app_screen8_flow.h"
+#include "app_screen8_enroll.h"
 #include "app_config.h"
 #include "app_ui_nav.h"
 #include "app_state.h"
+#include "app_key_ui.h"
+#include "./BSP/KEY/key.h"
 #include "./SYSTEM/sys/sys.h"
 
 #if (APP_USE_FREERTOS == 1)
@@ -25,6 +28,29 @@ extern lv_obj_t *g_screen8_popup;
 extern uint8_t g_nfc_enroll_state;
 extern uint8_t g_screen8_fp_enroll_state;
 extern lv_timer_t *g_screen8_result_timer;
+extern volatile app_scr_t g_app_scr;
+
+static lv_obj_t *s_screen8_popup_btn = NULL;
+
+#define SCREEN8_POPUP_HIT_PAD  6
+
+static bool screen8_popup_hit_btn(lv_coord_t x, lv_coord_t y)
+{
+    lv_area_t a;
+    lv_point_t p;
+
+    if(s_screen8_popup_btn == NULL || !lv_obj_is_valid(s_screen8_popup_btn)) {
+        return false;
+    }
+    lv_obj_get_coords(s_screen8_popup_btn, &a);
+    a.x1 -= SCREEN8_POPUP_HIT_PAD;
+    a.y1 -= SCREEN8_POPUP_HIT_PAD;
+    a.x2 += SCREEN8_POPUP_HIT_PAD;
+    a.y2 += SCREEN8_POPUP_HIT_PAD;
+    p.x = x;
+    p.y = y;
+    return _lv_area_is_point_on(&a, &p, 0);
+}
 
 bool screen8_try_read_chip(void)
 {
@@ -41,6 +67,7 @@ void screen8_popup_close_and_back(void)
         lv_obj_del(g_screen8_popup);
     }
     g_screen8_popup = NULL;
+    s_screen8_popup_btn = NULL;
     g_screen8_cursor = NULL;
     g_screen3_pending_index = 0u;
     g_screen3_need_init = 1u;
@@ -69,6 +96,23 @@ void screen8_popup_close_only(void)
         lv_obj_del(g_screen8_popup);
     }
     g_screen8_popup = NULL;
+    s_screen8_popup_btn = NULL;
+}
+
+uint8_t screen8_popup_touch(lv_coord_t x, lv_coord_t y)
+{
+    if(g_screen8_popup == NULL || !lv_obj_is_valid(g_screen8_popup)) {
+        return 0u;
+    }
+    if(!screen8_popup_hit_btn(x, y)) {
+        return 0u;
+    }
+    if(g_nfc_enroll_state == 1u || g_screen8_fp_enroll_state == 1u) {
+        app_key_ui_dispatch(KEY_ESC);
+    } else {
+        app_key_ui_dispatch(KEY_OK);
+    }
+    return 1u;
 }
 
 void screen8_popup_close_event_cb(lv_event_t *e)
@@ -81,16 +125,11 @@ void screen8_popup_close_event_cb(lv_event_t *e)
 static void screen8_enroll_popup_ok_cb(lv_event_t *e)
 {
     (void)e;
-    if(g_screen8_popup) {
-        lv_obj_del(g_screen8_popup);
-        g_screen8_popup = NULL;
+    if(g_nfc_enroll_state == 1u || g_screen8_fp_enroll_state == 1u) {
+        app_key_ui_dispatch(KEY_ESC);
+        return;
     }
-    if(g_nfc_enroll_state == 2u) {
-        g_nfc_enroll_state = 0u;
-    }
-    if(g_screen8_fp_enroll_state == 2u) {
-        g_screen8_fp_enroll_state = 0u;
-    }
+    app_key_ui_dispatch(KEY_OK);
 }
 
 void screen8_show_enroll_popup(const char *message)
@@ -101,6 +140,7 @@ void screen8_show_enroll_popup(const char *message)
         lv_obj_del(g_screen8_popup);
         g_screen8_popup = NULL;
     }
+    s_screen8_popup_btn = NULL;
 
     g_screen8_popup = lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_screen8_popup, 200, 120);
@@ -135,7 +175,13 @@ void screen8_show_enroll_popup(const char *message)
     lv_obj_set_style_text_font(btn_label, &lv_font_SourceHanSerifSC_Regular_20, 0);
     lv_obj_center(btn_label);
 
+    s_screen8_popup_btn = btn;
     lv_obj_add_event_cb(btn, screen8_enroll_popup_ok_cb, LV_EVENT_CLICKED, NULL);
+
+    if(!is_progress) {
+        g_nfc_enroll_state = 0u;
+        g_screen8_fp_enroll_state = 0u;
+    }
 
     if(g_screen8_result_timer != NULL) {
         lv_timer_del(g_screen8_result_timer);

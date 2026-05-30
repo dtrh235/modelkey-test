@@ -23,6 +23,30 @@ extern char g_screen5_found_acc[13];
 extern int g_nfc_op;
 extern lv_obj_t *g_screen8_popup;
 
+static lv_timer_t *s_screen9_result_timer = NULL;
+
+static void screen9_result_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    if(s_screen9_result_timer != NULL) {
+        lv_timer_del(s_screen9_result_timer);
+        s_screen9_result_timer = NULL;
+    }
+    screen9_hide_all_msgbox();
+}
+
+static void screen9_result_timer_start(void)
+{
+    if(s_screen9_result_timer != NULL) {
+        lv_timer_del(s_screen9_result_timer);
+        s_screen9_result_timer = NULL;
+    }
+    s_screen9_result_timer = lv_timer_create(screen9_result_timer_cb, 3000, NULL);
+    if(s_screen9_result_timer != NULL) {
+        lv_timer_set_repeat_count(s_screen9_result_timer, 1);
+    }
+}
+
 void screen9_set_focus(uint8_t focus)
 {
     ui_screen9_set_focus_style(focus, &g_screen9_focus, guider_ui.screen_9_btn_5, guider_ui.screen_9_btn_6);
@@ -30,6 +54,10 @@ void screen9_set_focus(uint8_t focus)
 
 void screen9_hide_all_msgbox(void)
 {
+    if(s_screen9_result_timer != NULL) {
+        lv_timer_del(s_screen9_result_timer);
+        s_screen9_result_timer = NULL;
+    }
     ui_common_hide_msgbox(&g_screen9_popup, &g_screen9_popup_btn_yes, &g_screen9_popup_btn_no, &g_screen9_msgbox_state);
 }
 
@@ -74,6 +102,7 @@ void screen9_show_delete_result_popup(uint8_t success)
     if(!lv_obj_is_valid(guider_ui.screen_9)) return;
     ui_common_show_result_popup(guider_ui.screen_9, &g_screen9_popup, success ? "删除成功" : "删除失败",
                                 &g_screen9_msgbox_state, success ? 2u : 3u);
+    screen9_result_timer_start();
 }
 
 void screen10_show_delete_result_popup(uint8_t success)
@@ -82,6 +111,7 @@ void screen10_show_delete_result_popup(uint8_t success)
     if(!lv_obj_is_valid(guider_ui.screen_10)) return;
     ui_common_show_result_popup(guider_ui.screen_10, &g_screen9_popup, success ? "删除成功" : "删除失败",
                                 &g_screen9_msgbox_state, success ? 2u : 3u);
+    screen9_result_timer_start();
 }
 
 uint8_t screen10_try_delete_fp(void)

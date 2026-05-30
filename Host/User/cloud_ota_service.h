@@ -33,5 +33,6 @@ void cloud_ota_service_report_event(cloud_event_t evt, const char *account);
     cloud_ota_service_report_unlock_record_ex((acc), (mtd), (ms), CLOUD_UNLOCK_DEVICE_MASTER)
 void cloud_ota_service_report_unlock_record_ex(const char *account, const char *method,
                                                uint32_t uptime_ms, int unlock_device);
+void cloud_ota_service_flush_unlock_pending(void);
 
 #endif

@@ -25,12 +25,19 @@ void app_wifi_scan_scr11_leave(void);
 /* 云端 MQTT 上线后（仍在 WiFi 页）再启动 CWLAP 刷新 */
 void app_wifi_scan_on_cloud_online(void);
 uint8_t app_wifi_scan_busy(void);
+/* 1=连接/建链占用中，扫描应等待（不含已排队的 pending） */
+uint8_t app_wifi_scan_connect_hold_active(void);
+/* 1=仅 s_scan_hold_connect（诊断用） */
+uint8_t app_wifi_scan_connect_hold_scan_only(void);
+void app_wifi_scan_release_connect_hold(void);
 /* 1=WiFi 页/扫描/连接进行中：Cloud 仅跑 WiFi，禁止 MQTT/OTA/UART2 抢占 */
 uint8_t app_wifi_exclusive_mode(void);
 /* 仅 scr11 有效；其它界面调用无效 */
 void app_wifi_scan_kick(void);
 /* 刷新按钮：立即排队一次 CWLAP（不依赖 kick 内部条件） */
 void app_wifi_scan_request_now(void);
+/* 用户点「刷新」：下次扫描结束强制按新结果重绘列表（失败则清空） */
+void app_wifi_scan_mark_user_refresh(void);
 /* 进入 WiFi 设置页时调用 */
 void app_wifi_scan_kick_ui(void);
 void app_wifi_scan_run_blocking(void);
@@ -57,6 +64,8 @@ uint8_t app_wifi_scan_take_list_dirty(void);
 uint8_t app_wifi_scan_peek_list_dirty(void);
 /* ??????????? CWLAP??????? AT ??????????? */
 uint8_t app_wifi_scan_pass_completed(void);
+int app_wifi_scan_last_rc(void);
+uint8_t app_wifi_scan_last_failed(void);
 uint8_t app_wifi_scan_has_pending(void);
 /* 1=两次扫描间隔内，尚未到下次重扫时刻 */
 uint8_t app_wifi_scan_in_rescan_wait(void);
@@ -68,11 +77,15 @@ uint8_t app_wifi_scan_get_ssid_channel(const char *ssid);
 void app_wifi_scan_defer_rescan_ms(uint32_t ms);
 /* 中止 CWLAP 并等待 UART2/模组空闲（连接前必须调用） */
 uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms);
+/* CloudTask 内调用：仅停扫/清标志，不 poll（避免 mutex 重入） */
+void app_wifi_scan_drop_for_connect(void);
 /* 扫描/UI 结束后释放 UART2（清 async/ui_busy/尾包），便于下次扫描或连接 */
 void app_wifi_scan_release_uart2(void);
 
 void app_wifi_connect_reset(void);
 uint8_t app_wifi_connect_busy(void);
+/* GuiTask：CWJAP 已失败时立刻释放 connect_busy / link guard，恢复扫描 */
+void app_wifi_connect_gui_recover(void);
 void app_wifi_connect_start(const char *ssid, const char *password);
 /* 0=busy 1=ok 2=fail */
 uint8_t app_wifi_connect_poll(void);

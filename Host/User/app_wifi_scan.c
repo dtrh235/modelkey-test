@@ -1,4 +1,5 @@
 #include "app_wifi_scan.h"
+#include "app_screen_wifi_flow.h"
 #include "app_ccm_ram.h"
 #include "app_cloud_session.h"
 
@@ -13,6 +14,10 @@
 #endif
 #include "app_wifi_cfg.h"
 #include "app_config.h"
+#if (APP_WIFI_UART_DEBUG == 0)
+#undef printf
+#define printf(...) ((void)0)
+#endif
 #if (APP_USE_FREERTOS == 1)
 #include "FreeRTOS.h"
 #include "task.h"
@@ -24,6 +29,7 @@
 #include "app_wifi_policy.h"
 #include "app_wifi_remember.h"
 #include "app_state.h"
+#include "app_link_guard.h"
 #include "SYSTEM/usart/usart.h"
 #include "stm32f4xx_hal.h"
 
@@ -91,10 +97,13 @@ static uint32_t s_conn_abort_deadline = 0u;
 static uint8_t s_conn_result = 0u;
 static uint8_t s_conn_finish_r = 0u;
 static uint8_t s_conn_finish_pending = 0u;
+static uint8_t s_conn_esp_idle = 0u;
 static volatile uint8_t s_list_dirty = 0u;
 static volatile uint8_t s_scan_pass = 0u;
+static int s_scan_last_rc = 0;
 /* 连接进行中：完全停扫，避免 CWLAP 与 CWJAP 抢 UART2 */
 static uint8_t s_scan_hold_connect = 0u;
+static uint8_t s_scan_user_refresh = 0u;
 
 static void app_wifi_scan_abort_inflight_no_policy(void)
 {
@@ -113,6 +122,13 @@ static void app_wifi_scan_pause_for_connect(void)
     WIFI_DBG("scan paused until connect done");
 }
 
+void app_wifi_scan_release_connect_hold(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    s_scan_hold_connect = 0u;
+#endif
+}
+
 static void app_wifi_scan_resume_after_connect(void)
 {
     if(s_scan_hold_connect == 0u) {
@@ -128,16 +144,38 @@ static void app_wifi_scan_resume_after_connect(void)
     WIFI_DBG("scan hold released (manual refresh only)");
 }
 
+static uint8_t app_wifi_scan_connect_holds(void);
+
+uint8_t app_wifi_scan_connect_hold_active(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    return app_wifi_scan_connect_holds();
+#else
+    return 0u;
+#endif
+}
+
+uint8_t app_wifi_scan_connect_hold_scan_only(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    return s_scan_hold_connect;
+#else
+    return 0u;
+#endif
+}
+
 static uint8_t app_wifi_scan_connect_holds(void)
 {
     if(s_scan_hold_connect != 0u) {
         return 1u;
     }
+    if(app_link_guard_blocks_scan() != 0u) {
+        return 1u;
+    }
     if(app_wifi_connect_busy() != 0u) {
         return 1u;
     }
-    /* 仅在真实 WiFi 建链流程中停扫；不要把 scan 自己的 ui_busy 也算进来。 */
-    if(cloud_aliyun_at_wifi_bringup_active() != 0u) {
+    if(cloud_aliyun_at_user_wifi_join_active() != 0u) {
         return 1u;
     }
     return 0u;
@@ -155,7 +193,7 @@ static uint8_t app_wifi_scan_allowed(void)
     if(app_wifi_remember_autoconnect_busy() != 0u) {
         return 0u;
     }
-    if(app_cloud_session_busy() != 0u) {
+    if(app_cloud_session_busy() != 0u && cloud_aliyun_at_scr11_cloud_hold() == 0u) {
         return 0u;
     }
     return 1u;
@@ -359,10 +397,6 @@ static void scan_finish_parse(void)
 void app_wifi_scan_release_uart2(void)
 {
     cloud_aliyun_cwlap_scan_abort();
-    cloud_aliyun_at_cwlap_scan_async_abort();
-    cloud_uart2_set_ui_busy(0u);
-    cloud_uart2_drain_hw(80u);
-    cloud_uart2_rx_clear();
 }
 
 static void wifi_scan_finish(int rc, uint16_t pos)
@@ -370,9 +404,8 @@ static void wifi_scan_finish(int rc, uint16_t pos)
     uint8_t connect_hold = app_wifi_scan_connect_holds();
 
     if(rc == -9) {
-        WIFI_DBG("scan aborted");
+        WIFI_DBG("scan abort -9 pend=%u", (unsigned)g_wifi_scan_pending);
         s_scan_st = SCAN_ST_IDLE;
-        g_wifi_scan_pending = 0u;
         app_wifi_scan_release_uart2();
         return;
     }
@@ -383,28 +416,29 @@ static void wifi_scan_finish(int rc, uint16_t pos)
         app_wifi_scan_release_uart2();
         return;
     }
-    s_scan_pass = 1u;
+    s_list_dirty = 1u;
     if(rc < 0) {
-        char tail[96];
-        cloud_uart2_copy_rx_win(tail, sizeof(tail));
-        WIFI_DBG("scan fail rc=%d rx_bytes=%u rx_win=%s", rc, (unsigned)pos, tail);
-        /* 失败/中断扫描时不要用残缺缓冲覆盖旧列表，否则会出现“只剩 1 个 AP”。 */
-        WIFI_DBG("scan fail keep previous list ap=%u", (unsigned)s_ap_count);
+        printf("[WiFi] scan fail rc=%d\r\n", rc);
+        s_scan_pass = 0u;
+        s_scan_last_rc = rc;
         s_scan_st = SCAN_ST_IDLE;
         (void)connect_hold;
         g_wifi_scan_pending = 0u;
         app_wifi_scan_release_uart2();
+        screen_wifi_gui_wake();
         return;
     }
+    s_scan_pass = 1u;
+    s_scan_last_rc = 0;
     scan_finish_parse();
-    WIFI_DBG("scan OK ap=%u dirty=1", (unsigned)s_ap_count);
-    s_list_dirty = 1u;
+    printf("[WiFi] scan OK ap=%u\r\n", (unsigned)s_ap_count);
     if(connect_hold == 0u && s_ap_count > 0u) {
         app_wifi_policy_on_scan_done();
     }
     s_scan_st = SCAN_ST_IDLE;
     g_wifi_scan_pending = 0u;
     app_wifi_scan_release_uart2();
+    screen_wifi_gui_wake();
 }
 
 static void wifi_run_scan_blocking(void)
@@ -443,6 +477,24 @@ uint8_t app_wifi_scan_pass_completed(void)
 {
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
     return s_scan_pass;
+#else
+    return 0u;
+#endif
+}
+
+int app_wifi_scan_last_rc(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    return s_scan_last_rc;
+#else
+    return 0;
+#endif
+}
+
+uint8_t app_wifi_scan_last_failed(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    return (s_scan_last_rc < 0) ? 1u : 0u;
 #else
     return 0u;
 #endif
@@ -630,11 +682,33 @@ void app_wifi_scan_kick(void)
 #endif
 }
 
+void app_wifi_scan_mark_user_refresh(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    s_scan_user_refresh = 1u;
+    s_scan_last_rc = 0;
+#endif
+}
+
 void app_wifi_scan_request_now(void)
 {
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
     if(app_wifi_on_scr11() == 0u) {
         return;
+    }
+    if(app_wifi_connect_busy() != 0u) {
+        printf("[WiFi] scan request blocked: connecting\r\n");
+        return;
+    }
+    if(app_link_guard_blocks_scan() != 0u) {
+        printf("[WiFi] scan request blocked: link guard\r\n");
+        return;
+    }
+    if(s_scan_st == SCAN_ST_BUSY || cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
+        cloud_aliyun_cwlap_scan_abort();
+        cloud_aliyun_at_cwlap_scan_async_abort();
+        s_scan_st = SCAN_ST_IDLE;
+        cloud_uart2_set_ui_busy(0u);
     }
     g_wifi_scan_abort = 0u;
     s_scan_next_ms = HAL_GetTick();
@@ -722,22 +796,20 @@ void app_wifi_scan_service(void)
     if(app_wifi_scan_allowed() == 0u) {
         return;
     }
-    g_wifi_scan_pending = 0u;
-#if (APP_WIFI_UART_DEBUG != 0)
-    usart_debug_tx_str("[WiFi] scan run\r\n");
-#endif
     cloud_aliyun_at_scr11_enter();
     s_scan_pass = 0u;
     s_scan_pos = 0u;
     WIFI_DBG("scan CWLAP scr=%u", (unsigned)g_app_scr);
     {
         int rc = cloud_aliyun_at_cwlap_scan_async_start(s_scan_buf, SCAN_BUF_SZ, &s_scan_pos);
-        if(rc == CWLAP_SCAN_RUNNING && cloud_aliyun_at_cwlap_scan_async_active() == 0u) {
-            /* UART2 mutex 被 Cloud 占用：保持 pending，下轮再扫，勿置 BUSY */
+        if(rc == CWLAP_SCAN_DEFERRED ||
+           (rc == CWLAP_SCAN_RUNNING && cloud_aliyun_at_cwlap_scan_async_active() == 0u)) {
             g_wifi_scan_pending = 1u;
-            WIFI_DBG("scan defer (uart2 mutex busy)");
+            WIFI_DBG("scan defer (uart2 busy)");
             return;
         }
+        g_wifi_scan_pending = 0u;
+        printf("[WiFi] scan run start\r\n");
         if(rc != CWLAP_SCAN_RUNNING) {
             s_scan_st = SCAN_ST_IDLE;
             wifi_scan_finish(rc, s_scan_pos);
@@ -789,10 +861,12 @@ void app_wifi_scan_gui_tick(void)
         g_wifi_exclusive = 1u;
     }
     if(app_wifi_scan_connect_holds() != 0u) {
-        g_wifi_scan_pending = 0u;
-        app_wifi_scan_abort_inflight_no_policy();
-        s_scan_st = SCAN_ST_IDLE;
+        if(s_scan_st == SCAN_ST_BUSY || cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
+            app_wifi_scan_abort_inflight_no_policy();
+            s_scan_st = SCAN_ST_IDLE;
+        }
         cloud_uart2_set_ui_busy(0u);
+        return;
     }
 #else
     (void)0;
@@ -823,9 +897,35 @@ uint8_t app_wifi_scan_uart_busy(void)
 #endif
 }
 
+static void app_wifi_scan_log_block(const char *why)
+{
+    printf("[WiFi] scan wait: %s pend=%u busy=%u hold=%u guard=%u session=%u async=%u ui=%u\r\n",
+           why,
+           (unsigned)g_wifi_scan_pending,
+           (unsigned)(s_scan_st == SCAN_ST_BUSY),
+           (unsigned)app_wifi_scan_connect_holds(),
+           (unsigned)app_link_guard_active(),
+           (unsigned)app_cloud_session_busy(),
+           (unsigned)cloud_aliyun_at_cwlap_scan_async_active(),
+           (unsigned)cloud_uart2_ui_busy());
+}
+
 void app_wifi_scan_cloud_tick(void)
 {
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    static uint32_t s_scan_block_log_ms;
+
+    if(app_link_guard_wifi() != 0u || app_link_guard_mqtt() != 0u) {
+        if(g_wifi_scan_pending != 0u) {
+            uint32_t now = HAL_GetTick();
+            if(s_scan_block_log_ms == 0u || (now - s_scan_block_log_ms) >= 2000u) {
+                s_scan_block_log_ms = now;
+                app_wifi_scan_log_block("link_guard");
+            }
+        }
+        return;
+    }
+    s_scan_block_log_ms = 0u;
     if(g_app_scr != APP_SCR_11 && g_wifi_exclusive == 0u) {
         return;
     }
@@ -833,8 +933,8 @@ void app_wifi_scan_cloud_tick(void)
     app_wifi_scan_poll();
     if(s_scan_st == SCAN_ST_BUSY) {
         if(cloud_aliyun_at_cwlap_scan_async_active() == 0u) {
-            s_scan_st = SCAN_ST_IDLE;
-            app_wifi_scan_release_uart2();
+            WIFI_DBG("scan stale busy");
+            wifi_scan_finish(-9, s_scan_pos);
             return;
         }
         {
@@ -854,9 +954,27 @@ void app_wifi_scan_cloud_tick(void)
         return;
     }
     if(app_wifi_scan_connect_holds() != 0u) {
+        if(g_wifi_scan_pending != 0u) {
+            uint32_t now = HAL_GetTick();
+            if(s_scan_block_log_ms == 0u || (now - s_scan_block_log_ms) >= 2000u) {
+                s_scan_block_log_ms = now;
+                app_wifi_scan_log_block("connect_hold");
+            }
+        }
         return;
     }
     if(app_wifi_scan_allowed() == 0u) {
+        if(g_wifi_scan_pending != 0u) {
+            uint32_t now = HAL_GetTick();
+            if(s_scan_block_log_ms == 0u || (now - s_scan_block_log_ms) >= 2000u) {
+                s_scan_block_log_ms = now;
+                printf("[WiFi] scan wait: not_allowed sess=%u hold=%u join=%u\r\n",
+                       (unsigned)app_cloud_session_busy(),
+                       (unsigned)app_wifi_scan_connect_holds(),
+                       (unsigned)cloud_aliyun_at_user_wifi_join_active());
+                app_wifi_scan_log_block("not_allowed");
+            }
+        }
         return;
     }
     app_wifi_scan_service();
@@ -915,28 +1033,54 @@ void app_wifi_connect_reset(void)
 #endif
 }
 
-static uint8_t app_wifi_connect_uart_idle(void)
+static void app_wifi_connect_uart_teardown(void)
 {
-    if(s_scan_st == SCAN_ST_BUSY) {
-        return 0u;
-    }
-    if(cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
-        return 0u;
-    }
-    if(cloud_uart2_ui_busy() != 0u) {
-        return 0u;
-    }
-    return 1u;
+    g_wifi_scan_abort = 1u;
+    s_scan_st = SCAN_ST_IDLE;
+    cloud_aliyun_cwlap_scan_abort();
+    cloud_aliyun_at_cwlap_scan_async_abort();
+    cloud_uart2_set_ui_busy(0u);
+    cloud_uart2_drain_hw(250u);
+    cloud_uart2_rx_clear();
+    app_wifi_scan_release_uart2();
 }
 
 static void app_wifi_connect_fail(uint8_t result)
 {
+    app_link_guard_wifi_end(0u);
     s_conn_result = result;
     s_conn_st = CONN_ST_IDLE;
     s_conn_phase = CONN_PHASE_IDLE;
     s_conn_finish_r = result;
     s_conn_finish_pending = 1u;
+    cloud_aliyun_at_user_wifi_join_abort();
+    cloud_aliyun_at_user_wifi_join_fail_clear();
+    app_wifi_connect_uart_teardown();
     app_wifi_scan_resume_after_connect();
+    app_wifi_scan_release_connect_hold();
+    g_wifi_scan_abort = 0u;
+    screen_wifi_notify_connect_fail();
+}
+
+void app_wifi_connect_gui_recover(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    if(s_conn_st != CONN_ST_BUSY) {
+        return;
+    }
+    if(cloud_aliyun_at_user_wifi_join_fail_pending() != 0u ||
+       cloud_aliyun_at_user_wifi_join_state() == 3u) {
+        app_wifi_connect_fail(2u);
+        return;
+    }
+    if(cloud_aliyun_at_user_wifi_join_active() == 0u &&
+       cloud_aliyun_at_wifi_bringup_active() == 0u &&
+       s_conn_phase == CONN_PHASE_JOIN) {
+        app_wifi_connect_fail(2u);
+    }
+#else
+    (void)0;
+#endif
 }
 
 uint8_t app_wifi_connect_take_result(void)
@@ -956,6 +1100,14 @@ uint8_t app_wifi_connect_take_result(void)
 #endif
 }
 
+void app_wifi_scan_drop_for_connect(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    g_wifi_scan_abort = 1u;
+    g_wifi_scan_pending = 0u;
+#endif
+}
+
 uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
 {
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
@@ -963,28 +1115,11 @@ uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
 
     g_wifi_scan_abort = 1u;
     cloud_aliyun_cwlap_scan_abort();
-    if(s_scan_st == SCAN_ST_BUSY) {
-        int rc = cloud_aliyun_at_cwlap_scan_async_poll();
-        if(rc != CWLAP_SCAN_RUNNING) {
-            s_scan_st = SCAN_ST_IDLE;
-            wifi_scan_finish(rc, s_scan_pos);
-        }
-    }
-
     while((HAL_GetTick() - t0) < timeout_ms) {
-        if(s_scan_st == SCAN_ST_BUSY) {
-            int rc = cloud_aliyun_at_cwlap_scan_async_poll();
-            if(rc != CWLAP_SCAN_RUNNING) {
-                s_scan_st = SCAN_ST_IDLE;
-                wifi_scan_finish(rc, s_scan_pos);
-            }
-        }
         if(!app_wifi_scan_busy() &&
            cloud_aliyun_at_cwlap_scan_async_active() == 0u &&
            cloud_uart2_ui_busy() == 0u) {
-            cloud_uart2_drain_hw(100u);
-            cloud_uart2_rx_clear();
-            WIFI_DBG("uart2 idle after scan abort (%lums)",
+            WIFI_DBG("scan mcu idle after abort (%lums)",
                      (unsigned long)(HAL_GetTick() - t0));
             return 1u;
         }
@@ -994,7 +1129,7 @@ uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
         HAL_Delay(5u);
 #endif
     }
-    WIFI_DBG("uart2 idle wait TIMEOUT %lums busy=%u async=%u ui_busy=%u",
+    WIFI_DBG("scan mcu idle wait TIMEOUT %lums busy=%u async=%u ui_busy=%u",
              (unsigned long)timeout_ms,
              (unsigned)app_wifi_scan_busy(),
              (unsigned)cloud_aliyun_at_cwlap_scan_async_active(),
@@ -1015,22 +1150,6 @@ uint8_t app_wifi_connect_busy(void)
 #endif
 }
 
-static void app_wifi_scan_kill_for_connect(void)
-{
-    g_wifi_scan_abort = 1u;
-    g_wifi_scan_pending = 0u;
-    cloud_aliyun_cwlap_scan_abort();
-    cloud_aliyun_at_cwlap_scan_async_abort();
-    if(s_scan_st == SCAN_ST_BUSY) {
-        int rc = cloud_aliyun_at_cwlap_scan_async_poll();
-        if(rc != CWLAP_SCAN_RUNNING) {
-            wifi_scan_finish(rc, s_scan_pos);
-        }
-    }
-    s_scan_st = SCAN_ST_IDLE;
-    cloud_uart2_set_ui_busy(0u);
-}
-
 void app_wifi_connect_start(const char *ssid, const char *password)
 {
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
@@ -1040,40 +1159,31 @@ void app_wifi_connect_start(const char *ssid, const char *password)
     if(password == NULL) {
         password = "";
     }
-    if(s_conn_st == CONN_ST_BUSY) {
+    if(app_link_guard_blocks_wifi_connect() != 0u) {
         return;
     }
-    if(s_scan_st == SCAN_ST_BUSY || g_wifi_scan_pending != 0u ||
-       cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
-#if (APP_WIFI_CWJAP_TRACE != 0)
-        usart_debug_tx_str("[WiFi] connect blocked: scan busy\r\n");
-#endif
+    if(s_conn_st == CONN_ST_BUSY) {
         return;
     }
     app_wifi_cfg_set(ssid, password);
     WIFI_DBG("connect start ssid=%s pwd_len=%u", ssid, (unsigned)strlen(app_wifi_cfg_get_password()));
     app_wifi_scan_pause_for_connect();
-    app_wifi_scan_kill_for_connect();
-    app_wifi_scan_release_uart2();
-    (void)app_wifi_scan_abort_and_wait_idle(3000u);
-    cloud_uart2_wait_scan_tail_quiet(1200u);
-#if (APP_WIFI_CWJAP_TRACE != 0)
-    if(app_wifi_scan_has_ssid(ssid) == 0u) {
-        usart_debug_tx_str("[WiFi] connect warn: ssid not in last scan\r\n");
-    }
-#endif
+    app_link_guard_wifi_begin();
+    s_conn_esp_idle = 0u;
     s_conn_st = CONN_ST_BUSY;
     s_conn_result = 0u;
     s_conn_finish_r = 0u;
     s_conn_finish_pending = 0u;
     s_conn_deadline = HAL_GetTick() + CONNECT_TIMEOUT_MS;
-    s_conn_phase = CONN_PHASE_JOIN;
-    cloud_aliyun_at_user_wifi_join_start();
-    WIFI_DBG("connect join queued join_st=%u scan=%u async=%u ui=%u",
-             (unsigned)cloud_aliyun_at_user_wifi_join_state(),
+    s_conn_abort_deadline = HAL_GetTick() + 25000u;
+    s_conn_phase = CONN_PHASE_ABORT_SCAN;
+#if (APP_WIFI_CWJAP_TRACE != 0)
+    usart_debug_tx_str("[WiFi] connect abort wait\r\n");
+#endif
+    WIFI_DBG("connect queued phase=abort scan=%u async=%u pending=%u",
              (unsigned)app_wifi_scan_busy(),
              (unsigned)cloud_aliyun_at_cwlap_scan_async_active(),
-             (unsigned)cloud_uart2_ui_busy());
+             (unsigned)g_wifi_scan_pending);
 #else
     (void)ssid;
     (void)password;
@@ -1089,31 +1199,51 @@ uint8_t app_wifi_connect_poll(void)
         return s_conn_result;
     }
 
+    if(s_conn_st == CONN_ST_BUSY &&
+       (cloud_aliyun_at_user_wifi_join_fail_pending() != 0u ||
+        cloud_aliyun_at_user_wifi_join_state() == 3u)) {
+        app_wifi_connect_fail(2u);
+        return 2u;
+    }
+
     if(s_conn_phase == CONN_PHASE_ABORT_SCAN) {
-        if(s_scan_st == SCAN_ST_BUSY) {
-            int rc = cloud_aliyun_at_cwlap_scan_async_poll();
-            if(rc != CWLAP_SCAN_RUNNING) {
-                s_scan_st = SCAN_ST_IDLE;
-                wifi_scan_finish(rc, s_scan_pos);
+        if(s_scan_st == SCAN_ST_BUSY || cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
+            return 0u;
+        }
+        if(s_conn_esp_idle == 0u) {
+            if(cloud_aliyun_at_cwlap_teardown_idle(3800u) != 0u) {
+                s_conn_esp_idle = 1u;
+#if (APP_WIFI_CWJAP_TRACE != 0)
+                usart_debug_tx_str("[WiFi] connect esp idle ok\r\n");
+#endif
+            } else if(HAL_GetTick() >= s_conn_abort_deadline) {
+#if (APP_WIFI_CWJAP_TRACE != 0)
+                usart_debug_tx_str("[WiFi] connect esp idle timeout\r\n");
+#endif
+                WIFI_DBG("connect esp idle timeout -> join anyway");
+                s_conn_esp_idle = 1u;
+            } else {
+                return 0u;
             }
         }
-        if(app_wifi_connect_uart_idle() != 0u) {
-            s_conn_phase = CONN_PHASE_JOIN;
-            cloud_aliyun_at_user_wifi_join_start();
-        } else if(HAL_GetTick() >= s_conn_abort_deadline) {
-            WIFI_DBG("connect abort scan timeout -> join anyway");
-            s_conn_phase = CONN_PHASE_JOIN;
-            cloud_aliyun_at_user_wifi_join_start();
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        if(app_wifi_scan_has_ssid(app_wifi_cfg_get_ssid()) == 0u) {
+            usart_debug_tx_str("[WiFi] connect warn: ssid not in last scan\r\n");
         }
+#endif
+        s_conn_phase = CONN_PHASE_JOIN;
+        cloud_aliyun_at_user_wifi_join_set_esp_idle_ok();
+        cloud_aliyun_at_user_wifi_join_start();
         return 0u;
     }
 
     jr = cloud_aliyun_at_user_wifi_join_poll();
     if(jr == 2u) {
-        if(cloud_aliyun_at_wifi_link_ready() != 0u) {
+        if(cloud_aliyun_at_user_wifi_join_fail_pending() != 0u) {
+            /* 保持 jr=2，立即收尾 */
+        } else if(cloud_aliyun_at_wifi_link_ready() != 0u) {
             jr = 1u;
-        } else if(cloud_aliyun_at_wifi_bringup_active() != 0u ||
-                  cloud_aliyun_at_user_wifi_join_state() == 1u) {
+        } else if(cloud_aliyun_at_user_wifi_join_active() != 0u) {
             jr = 0u;
         }
     }
@@ -1122,6 +1252,10 @@ uint8_t app_wifi_connect_poll(void)
         static uint32_t s_conn_wait_log_ms;
         uint32_t now = HAL_GetTick();
 
+        if(cloud_aliyun_at_user_wifi_join_fail_pending() != 0u) {
+            app_wifi_connect_fail(2u);
+            return 2u;
+        }
         if(cloud_aliyun_at_user_wifi_join_active() == 0u &&
            cloud_aliyun_at_wifi_bringup_active() == 0u &&
            cloud_aliyun_at_wifi_link_ready() == 0u) {
@@ -1171,15 +1305,8 @@ uint8_t app_wifi_connect_poll(void)
         return 0u;
     }
     if(jr == 2u) {
-        char rx_tail[128];
-        cloud_uart2_copy_rx_win(rx_tail, sizeof(rx_tail));
-        WIFI_DBG("connect FAIL ssid=%s pwd_len=%u bringup=%u join=%u link=%u rx=%s",
-                 app_wifi_cfg_get_ssid(),
-                 (unsigned)strlen(app_wifi_cfg_get_password()),
-                 (unsigned)cloud_aliyun_at_wifi_bringup_active(),
-                 (unsigned)cloud_aliyun_at_user_wifi_join_active(),
-                 (unsigned)cloud_aliyun_at_wifi_link_ready(),
-                 rx_tail);
+        app_wifi_connect_fail(2u);
+        return 2u;
     }
     s_conn_result = jr;
     s_conn_st = CONN_ST_IDLE;
@@ -1187,6 +1314,10 @@ uint8_t app_wifi_connect_poll(void)
     s_conn_finish_r = jr;
     s_conn_finish_pending = 1u;
     app_wifi_scan_resume_after_connect();
+    if(jr == 1u) {
+        app_link_guard_wifi_end(1u);
+        screen_wifi_notify_sta_up();
+    }
     return jr;
 #else
     return 2u;
@@ -1211,6 +1342,7 @@ void app_wifi_scan_on_cloud_online(void) { (void)0; }
 uint8_t app_wifi_scan_busy(void) { return 0u; }
 void app_wifi_scan_kick(void) { (void)0; }
 void app_wifi_scan_request_now(void) { (void)0; }
+void app_wifi_scan_mark_user_refresh(void) { (void)0; }
 void app_wifi_scan_kick_ui(void) { (void)0; }
 void app_wifi_scan_run_blocking(void) { (void)0; }
 void app_wifi_scan_poll(void) { (void)0; }
@@ -1237,6 +1369,7 @@ uint8_t app_wifi_scan_has_pending(void) { return 0u; }
 uint8_t app_wifi_scan_in_rescan_wait(void) { return 0u; }
 uint8_t app_wifi_scan_has_ssid(const char *ssid) { (void)ssid; return 0u; }
 void app_wifi_scan_defer_rescan_ms(uint32_t ms) { (void)ms; }
+void app_wifi_scan_drop_for_connect(void) { (void)0; }
 uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
 {
     (void)timeout_ms;
@@ -1245,6 +1378,10 @@ uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
 void app_wifi_connect_reset(void) { (void)0; }
 void app_wifi_scan_release_uart2(void) { (void)0; }
 uint8_t app_wifi_connect_busy(void) { return 0u; }
+uint8_t app_wifi_scan_connect_hold_active(void) { return 0u; }
+uint8_t app_wifi_scan_connect_hold_scan_only(void) { return 0u; }
+void app_wifi_scan_release_connect_hold(void) { (void)0; }
+void app_wifi_connect_gui_recover(void) { (void)0; }
 void app_wifi_connect_start(const char *ssid, const char *password) { (void)ssid; (void)password; }
 uint8_t app_wifi_connect_poll(void) { return 2u; }
 uint8_t app_wifi_connect_take_result(void) { return 0u; }

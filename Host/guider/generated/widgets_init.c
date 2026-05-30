@@ -11,6 +11,7 @@
 #include "gui_guider.h"
 #include "widgets_init.h"
 #include "app_wall_clock.h"
+#include "app_wifi_diag.h"
 #include "src/widgets/lv_dclock.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -155,6 +156,8 @@ void screen_datetext_1_calendar_event_handler(lv_event_t *e)
 void app_home_wall_clock_set(int year, int month, int day, int hour, int min, int sec)
 {
     char datebuf[20];
+    uint8_t ui_date_ok = 0u;
+    uint8_t ui_clk_ok = 0u;
 
     screen_digital_clock_1_hour_value = hour;
     screen_digital_clock_1_min_value = min;
@@ -163,11 +166,19 @@ void app_home_wall_clock_set(int year, int month, int day, int hour, int min, in
     (void)snprintf(datebuf, sizeof(datebuf), "%04d/%02d/%02d", year, month, day);
     if(lv_obj_is_valid(guider_ui.screen_datetext_1)) {
         lv_label_set_text(guider_ui.screen_datetext_1, datebuf);
+        ui_date_ok = 1u;
     }
-    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1) &&
-       lv_obj_get_screen(guider_ui.screen_digital_clock_1) == guider_ui.screen) {
+    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1)) {
         lv_dclock_set_text_fmt(guider_ui.screen_digital_clock_1, "%d:%02d", hour, min);
+        ui_clk_ok = 1u;
     }
     app_wall_clock_on_set(year, month, day, hour, min, sec);
+    if(ui_date_ok == 0u && ui_clk_ok == 0u) {
+        TIME_TRACE_MSG("[TIME]U0\r\n");
+    } else if(ui_date_ok == 0u || ui_clk_ok == 0u) {
+        TIME_TRACE_MSG("[TIME]U1\r\n");
+    } else {
+        TIME_TRACE_MSG("[TIME]U2\r\n");
+    }
 }
 

@@ -11,6 +11,8 @@ void screen7_set_msgbox1_choice(uint8_t yes_selected);
 void screen7_show_msgbox1(void);
 void screen7_show_msgbox2(void);
 void screen7_show_msgbox3(void);
+void screen7_show_delete_result(uint8_t success, uint8_t was_admin);
+void screen7_dismiss_result_popup(void);
 void screen7_set_field_selected(void);
 void screen7_handle_input_key(KeyValue_t key);
 void screen7_cursor_blink_handle(void);

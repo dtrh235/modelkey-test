@@ -7,6 +7,8 @@
 #include "app_wifi_cfg.h"
 #include "app_wifi_policy.h"
 #include "app_wifi_scan.h"
+#include "app_link_guard.h"
+#include "cloud_ota_service.h"
 
 uint8_t app_cloud_session_busy(void);
 #include "app_wifi_diag.h"
@@ -45,8 +47,21 @@ static int uart2_send_text(const char *txt);
 static int uart2_send_bytes(const uint8_t *buf, uint16_t len);
 static int uart2_wait_text(const char *needle, uint32_t timeout_ms);
 static int uart2_read_byte_timeout(uint8_t *out, uint32_t timeout_ms);
+static void cloud_uart2_rx_push_char(char ch);
 static void cloud_uart2_quiet_for_cwlap(void);
 static void cloud_uart2_copy_cwjap_ssid(char *out, uint16_t out_sz);
+static void cloud_uart2_hw_drain_ms(uint32_t ms);
+static void cloud_uart2_drain_until_idle(uint32_t max_ms, uint32_t quiet_ms);
+static void aliyun_mqtt_close_link0(void);
+static void aliyun_mqtt_uart_prep(void);
+static void cloud_uart2_wait_quiet_after_scan_abort(uint32_t quiet_ms);
+static void cloud_uart2_flush_rx(void);
+static uint8_t cloud_uart2_wait_modem_idle(uint32_t timeout_ms);
+static uint8_t uart2_rx_has_ok_reply(void);
+static void cwjap_modem_purge(uint8_t hard_reset);
+static uint8_t cloud_uart2_wait_esp_ready(uint32_t timeout_ms);
+static uint8_t cwjap_scr11_radio_prep(void);
+static uint8_t uart2_at_cmd_wait_ok(const char *cmd, uint32_t timeout_ms);
 
 typedef enum {
     ALIYUN_STEP_IDLE = 0,
@@ -203,30 +218,66 @@ static uint8_t s_sntp_synced = 0u;
 static uint32_t s_sntp_retry_online_ms = 0u;
 static uint8_t s_http_date_tried = 0u;
 #endif
-static uint8_t s_ntp_subscribed = 0u;
+static uint32_t s_cipstart_next_ms = 0u;
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+static uint8_t s_sntp_cfg_sent = 0u;
+static uint32_t s_sntp_online_query_ms = 0u;
+#endif
 static uint8_t s_ntp_synced = 0u;
+static uint8_t s_ntp_sub_ok = 0u;
+static uint32_t s_ntp_sub_ms = 0u;
+static uint32_t s_ntp_req_dev_ms = 0u;
 static uint32_t s_ntp_next_request_ms = 0u;
+static uint32_t s_ntp_await_until_ms = 0u;
+static uint8_t s_ntp_sub_sess = 0u;
+static uint8_t s_ntp_give_up = 0u;
+static uint32_t s_ntp_next_try_ms = 0u;
+static uint8_t s_ntp_sync_running = 0u;
+static uint8_t s_ntp_connect_tried = 0u;
+static uint8_t s_ping_fail_streak = 0u;
 static uint16_t s_mqtt_pkt_id = 1u;
 static uint8_t s_uart_ui_busy = 0u;
 static uint8_t s_modem_at_ok = 0u;
+static uint8_t s_cipmux1_ok = 0u;
+static uint8_t s_mqtt_fast_join = 0u;
+static uint8_t s_cipsend_retry_cnt = 0u;
 static uint8_t s_scr11_mqtt_paused = 0u;
 static aliyun_step_t s_scr11_resume_step = ALIYUN_STEP_IDLE;
 static uint8_t s_wifi_sta_ip_ok = 0u;
 static uint8_t s_wifi_ever_up = 0u;
 static volatile uint8_t s_user_wifi_join_st = 0u; /* 0 idle 1 pending 2 ok 3 fail */
+static volatile uint8_t s_wifi_join_fail_latch = 0u;
 static uint8_t s_cwjap_busy_retry = 0u;
 static uint8_t s_cwjap_uart_settle_done = 0u;
+static uint8_t s_cwjap_resend_only = 0u;
+static uint32_t s_cwjap_quiet_until_ms = 0u;
 static uint32_t s_user_join_fail_log_ms = 0u;
 static char s_connected_sta_ssid[33];
 static uint8_t s_sta_radio_prep_done = 0u;
+static uint8_t s_cwjap_esp_idle_ok = 0u;
+static uint8_t s_cwjap_light_join = 0u;
+static uint8_t s_cwjap_light_need_prep = 0u;
+static uint8_t s_cwjap_try_channel = 0u;
 static uint8_t s_cloud_scan_kick_done = 0u;
 static uint8_t s_cifsr_retry_cnt = 0u;
 static uint32_t s_cifsr_last_try_ms = 0u;
 #define CIFSR_RETRY_MAX       20u
 #define CIFSR_RETRY_DELAY_MS  400u
-#define CWJAP_GOT_IP_WAIT_MS    6000u
+#define CWJAP_GOT_IP_WAIT_MS    5000u
 #define CWJAP_CONNECT_WAIT_MS   18000u
 #define CWJAP_JOIN_DEFER_FAIL_MS 4000u
+/* rev-66 可连逻辑不变；仅缩短 connect 前已 teardown_idle 的重复等待 */
+#define CWJAP_LIGHT_QUIET_MS       600u   /* was 2000 */
+#define CWJAP_LIGHT_HOLD_MS        350u   /* was 4000 quiet_until */
+#define CWJAP_LIGHT_BEFORE_SEND_MS 500u  /* was 1500 hw_drain */
+#define CWJAP_FAST_SETTLE_QUIET_MS 700u  /* was 1200 */
+#define CWJAP_FAST_SETTLE_AT_MS    1800u /* was 2500 */
+#define CWJAP_ESP_IDLE_HOLD_MS     350u  /* was 600 */
+#define CWJAP_PREP_HOLD_MS         600u  /* was 1200 */
+#define CWJAP_BUSY_RESEND_QUIET_MS 2500u /* was 3500 */
+#define CWJAP_CWQAP_HOLD_MS        800u  /* was 1500 */
+#define CWJAP_TEARDOWN_QUIET_MS    1800u /* teardown_idle 首段 */
+#define CWJAP_TEARDOWN_IDLE_MS     2000u /* teardown_idle 探活段 */
 
 #if (APP_USE_FREERTOS == 1)
 static void uart2_coop_yield(void)
@@ -241,6 +292,10 @@ static void uart2_coop_yield(void)
 }
 #endif
 
+static void uart2_drain_rx_ms(uint32_t ms);
+static uint8_t aliyun_ntp_try_parse_any(void);
+static uint8_t aliyun_ntp_apply_from_mqtt_chunk(const uint8_t *chunk, uint16_t len);
+
 static uint8_t cwlap_scan_should_stop(void)
 {
     return (g_wifi_scan_abort != 0u || g_wifi_exclusive == 0u) ? 1u : 0u;
@@ -253,12 +308,32 @@ static uint8_t cwlap_scan_should_stop(void)
 #define ALIYUN_WAIT_SHORT_MS 120u
 #define ALIYUN_WAIT_MID_MS 300u
 #define ALIYUN_WAIT_LONG_MS 800u
+/* 用户选 WiFi 连上后快路径：短超时 + 快重试（对齐文件夹1 思路，保留选网 UI） */
+#define ALIYUN_CIPSTART_WAIT_MS      2500u
+#define ALIYUN_CIPSTART_RETRY_MS     800u
+#define ALIYUN_CONNACK_WAIT_MS       5000u
+#define ALIYUN_CIPSEND_PROMPT_MS     2000u
+#define ALIYUN_POST_TCP_MQTT_MS      90u
+#define ALIYUN_POST_TCP_MQTT_FAST_MS 25u
+#define ALIYUN_MQTT_DRAIN_MAX_MS     110u
+#define ALIYUN_MQTT_DRAIN_QUIET_MS   14u
+#define ALIYUN_CIPSEND_RETRY_MAX     3u
+#define ALIYUN_CIPSEND_RETRY_MS      100u
+#define ALIYUN_MQTT_RECONNECT_MS     180u
 #define ALIYUN_SNTP_CMD_OK_MS 800u
-#define ALIYUN_SNTP_QUERY_MS 600u
-#define ALIYUN_SNTP_POSTCFG_DELAY_MS 4000u
+#define ALIYUN_SNTP_QUERY_MS 2500u
+#define ALIYUN_SNTP_POSTCFG_DELAY_MS 2000u
+#define ALIYUN_SNTP_POSTCFG_MIN_MS 2000u
+#define ALIYUN_SNTP_QUERY_GAP_MS 2000u
+#define ALIYUN_SNTP_MAX_TRY 5u
+#define ALIYUN_SNTP_PHASE_MS 25000u
+#define ALIYUN_SNTP_HTTP_AFTER_TRY 2u
 #define ALIYUN_SNTP_ONLINE_RETRY_MS 30000u
 #define ALIYUN_HTTP_DATE_HOST "www.baidu.com"
-#define ALIYUN_MQTT_NTP_RETRY_MS 60000u
+#define ALIYUN_MQTT_NTP_RSP_WAIT_MS   15000u
+#define ALIYUN_MQTT_NTP_SUB_SETTLE_MS 2000u
+#define ALIYUN_MQTT_NTP_RETRY_ONLINE_MS 60000u
+#define ALIYUN_MQTT_NTP_POLL_SLICE_MS 80u
 
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
 static int month_abbr_to_i(const char *m)
@@ -319,6 +394,9 @@ static void add_hours_to_datetime(int *y, int *mo, int *d, int *h, int add_h)
 
 static uint8_t aliyun_ensure_sta_ip(void)
 {
+    if(s_wifi_sta_ip_ok != 0u) {
+        return 1u;
+    }
     if(uart2_send_text("AT+CIFSR\r\n") &&
        (uart2_wait_text("STAIP", ALIYUN_WAIT_SHORT_MS) ||
         uart2_wait_text("+CIFSR:STAIP", ALIYUN_WAIT_MID_MS))) {
@@ -335,6 +413,18 @@ static uint8_t aliyun_rx_has_no_ip(void)
     return (strstr(s_rx_win, "no ip") != NULL) ? 1u : 0u;
 }
 
+static uint8_t aliyun_http_date_finish(uint8_t ok, uint8_t used_mux1)
+{
+    if(used_mux1 != 0u) {
+        uart2_send_text("AT+CIPCLOSE=1\r\n");
+    } else {
+        uart2_send_text("AT+CIPCLOSE\r\n");
+    }
+    (void)cloud_uart2_pump_rx(40u);
+    return ok;
+}
+
+#if (APP_ALIYUN_HTTP_DATE_ENABLE != 0)
 static uint8_t aliyun_try_fetch_http_date_once(void)
 {
     char cmd[96];
@@ -343,28 +433,50 @@ static uint8_t aliyun_try_fetch_http_date_once(void)
     char wk[4];
     char mon[4];
     int d = 1, y = 0, hh = 0, mm = 0, ss = 0, mo = 1;
+    uint8_t used_mux1 = 0u;
+    uint16_t req_len = (uint16_t)strlen(req);
 
     memset(s_rx_win, 0, sizeof(s_rx_win));
     s_rx_win_pos = 0u;
-
-    snprintf(cmd, sizeof(cmd), "AT+CIPSTART=1,\"TCP\",\"%s\",80\r\n", ALIYUN_HTTP_DATE_HOST);
-    if(!uart2_send_text(cmd) || !(uart2_wait_text("CONNECT", 1200u) || uart2_wait_text("ALREADY CONNECTED", 300u))) {
+    if(aliyun_ensure_sta_ip() == 0u) {
         return 0u;
     }
+    (void)uart2_at_cmd_wait_ok("AT+CIPCLOSE\r\n", 500u);
+    (void)uart2_at_cmd_wait_ok("AT+CIPCLOSE=0\r\n", 400u);
+    (void)uart2_at_cmd_wait_ok("AT+CIPCLOSE=1\r\n", 400u);
+    (void)uart2_at_cmd_wait_ok("AT+CIPMUX=0\r\n", 600u);
+    cloud_uart2_rx_clear();
 
-    snprintf(cmd, sizeof(cmd), "AT+CIPSEND=1,%u\r\n", (unsigned)strlen(req));
-    if(!uart2_send_text(cmd) || !uart2_wait_text(">", 400u)) {
-        uart2_send_text("AT+CIPCLOSE=1\r\n");
-        return 0u;
-    }
-    if(!uart2_send_text(req) || !uart2_wait_text("SEND OK", 600u)) {
-        uart2_send_text("AT+CIPCLOSE=1\r\n");
-        return 0u;
+    snprintf(cmd, sizeof(cmd), "AT+CIPSTART=\"TCP\",\"%s\",80\r\n", ALIYUN_HTTP_DATE_HOST);
+    if(!uart2_send_text(cmd) ||
+       !(uart2_wait_text("CONNECT", 2000u) || uart2_wait_text("ALREADY CONNECTED", 400u))) {
+        memset(s_rx_win, 0, sizeof(s_rx_win));
+        s_rx_win_pos = 0u;
+        if(!uart2_send_text("AT+CIPMUX=1\r\n") || !uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS)) {
+            return 0u;
+        }
+        used_mux1 = 1u;
+        snprintf(cmd, sizeof(cmd), "AT+CIPSTART=1,\"TCP\",\"%s\",80\r\n", ALIYUN_HTTP_DATE_HOST);
+        if(!uart2_send_text(cmd) ||
+           !(uart2_wait_text("CONNECT", 2000u) || uart2_wait_text("ALREADY CONNECTED", 400u))) {
+            return 0u;
+        }
     }
 
-    if(!uart2_wait_text("Date:", 1200u)) {
-        uart2_send_text("AT+CIPCLOSE=1\r\n");
-        return 0u;
+    if(used_mux1 != 0u) {
+        snprintf(cmd, sizeof(cmd), "AT+CIPSEND=1,%u\r\n", (unsigned)req_len);
+    } else {
+        snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%u\r\n", (unsigned)req_len);
+    }
+    if(!uart2_send_text(cmd) || !uart2_wait_text(">", 600u)) {
+        return aliyun_http_date_finish(0u, used_mux1);
+    }
+    if(!uart2_send_text(req) || !uart2_wait_text("SEND OK", 1200u)) {
+        return aliyun_http_date_finish(0u, used_mux1);
+    }
+
+    if(!uart2_wait_text("Date:", 2500u)) {
+        return aliyun_http_date_finish(0u, used_mux1);
     }
 
     p = strstr(s_rx_win, "Date:");
@@ -374,19 +486,250 @@ static uint8_t aliyun_try_fetch_http_date_once(void)
         if(y >= 2020 && mo >= 1 && mo <= 12) {
             app_home_wall_clock_set(y, mo, d, hh, mm, ss);
             s_sntp_synced = 1u;
-            printf("[ALIYUN] HTTP-Date synced: %04d-%02d-%02d %02d:%02d:%02d\r\n", y, mo, d, hh, mm, ss);
-            uart2_send_text("AT+CIPCLOSE=1\r\n");
-            return 1u;
+            s_ntp_synced = 1u;
+            TIME_TRACE_MSG("[TIME]Hok\r\n");
+            cloud_ota_service_flush_unlock_pending();
+            return aliyun_http_date_finish(1u, used_mux1);
         }
     }
-    uart2_send_text("AT+CIPCLOSE=1\r\n");
+    return aliyun_http_date_finish(0u, used_mux1);
+}
+#endif
+
+/* +CIPSNTPTIME: 后是否仍无有效时间（勿用 strncmp(...,13) 误判整行） */
+static uint8_t sntp_body_is_empty(const char *body)
+{
+    if(body == NULL) {
+        return 1u;
+    }
+    while(*body == ' ' || *body == '\r' || *body == '\n' || *body == '"') {
+        body++;
+    }
+    return (*body == '\0') ? 1u : 0u;
+}
+
+static const char *sntp_body_ptr(const char *p)
+{
+    const char *tag;
+    const char *body;
+    uint16_t skip;
+
+    if(p == NULL) {
+        return NULL;
+    }
+    tag = strstr(p, "+CIPSNTPTIME:");
+    if(tag != NULL) {
+        skip = 13u;
+    } else {
+        tag = strstr(p, "+CIPSNTP:");
+        if(tag == NULL) {
+            return NULL;
+        }
+        skip = 9u;
+    }
+    body = tag + skip;
+    while(*body == ' ' || *body == '"') {
+        body++;
+    }
+    return body;
+}
+
+static const char *sntp_find_last_line(const char *buf)
+{
+    const char *last = NULL;
+    const char *p;
+
+    if(buf == NULL) {
+        return NULL;
+    }
+    /* 勿匹配 "+CIPSNTP:" 子串（会把 +CIPSNTPTIME 的 body 弄成 "TIME..."） */
+    p = buf;
+    while((p = strstr(p, "+CIPSNTPTIME:")) != NULL) {
+        last = p;
+        p += 14u;
+    }
+    return last;
+}
+
+static uint8_t sntp_body_is_tz_only(const char *body)
+{
+    unsigned v = 0u;
+    const char *e;
+
+    if(body == NULL) {
+        return 0u;
+    }
+    if(sscanf(body, "%u", &v) != 1 || v >= 1000000u) {
+        return 0u;
+    }
+    e = body;
+    while(*e >= '0' && *e <= '9') {
+        e++;
+    }
+    while(*e == ' ' || *e == '\r' || *e == '\n' || *e == '"') {
+        e++;
+    }
+    return (*e == '\0') ? 1u : 0u;
+}
+
+/* 跳过 "<idx>,\"...\"," 前缀，指向真实日期时间字段 */
+static const char *sntp_body_time_tail(const char *body)
+{
+    const char *p;
+    const char *e;
+
+    if(body == NULL) {
+        return NULL;
+    }
+    p = body;
+    while(*p >= '0' && *p <= '9') {
+        p++;
+    }
+    if(p == body) {
+        return body;
+    }
+    if(*p == ',') {
+        p++;
+    }
+    while(*p == ' ' || *p == '"') {
+        if(*p == '"') {
+            e = strchr(p + 1, '"');
+            if(e == NULL) {
+                return p;
+            }
+            p = e + 1;
+        } else {
+            p++;
+        }
+        if(*p == ',') {
+            p++;
+        }
+    }
+    while(*p == ' ') {
+        p++;
+    }
+    return p;
+}
+
+/* 模组仅回报 STA MAC（SNTP 未完成），勿当 Ebd */
+static uint8_t sntp_body_is_mac_only(const char *body)
+{
+    const char *tail;
+
+    tail = sntp_body_time_tail(body);
+    if(tail == NULL || *tail == '\0') {
+        return 0u;
+    }
+    if(strchr(tail, '-') != NULL) {
+        return 0u;
+    }
+    if(strstr(tail, "Jan") != NULL || strstr(tail, "Feb") != NULL ||
+       strstr(tail, "Mar") != NULL || strstr(tail, "Apr") != NULL ||
+       strstr(tail, "May") != NULL || strstr(tail, "Jun") != NULL ||
+       strstr(tail, "Jul") != NULL || strstr(tail, "Aug") != NULL ||
+       strstr(tail, "Sep") != NULL || strstr(tail, "Oct") != NULL ||
+       strstr(tail, "Nov") != NULL || strstr(tail, "Dec") != NULL) {
+        return 0u;
+    }
+    return (strchr(tail, ':') != NULL) ? 1u : 0u;
+}
+
+/* ESP 尚未给出完整时间（仅 "1"/时区/MAC 等），应继续等而非当 Ebd */
+static uint8_t sntp_body_not_ready(const char *body)
+{
+    uint8_t blen = 0u;
+    const char *tail;
+
+    if(body == NULL || sntp_body_is_empty(body) != 0u) {
+        return 1u;
+    }
+    if(sntp_body_is_tz_only(body) != 0u) {
+        return 1u;
+    }
+    if(sntp_body_is_mac_only(body) != 0u) {
+        return 1u;
+    }
+    tail = sntp_body_time_tail(body);
+    if(tail != NULL && tail != body) {
+        body = tail;
+    }
+    while(body[blen] != '\0' && body[blen] != '\r' && body[blen] != '\n' && blen < 48u) {
+        blen++;
+    }
+    if(blen < 8u && strchr(body, '-') == NULL && strchr(body, ':') == NULL) {
+        return 1u;
+    }
     return 0u;
 }
 
-/* Short, bounded SNTP query to avoid UI/key lag. */
-static uint8_t aliyun_try_fetch_sntp_once(void)
+static uint8_t epoch_to_local_datetime(uint64_t epoch_sec, int tz_hour, int *y, int *mo, int *d, int *h, int *mi, int *s);
+static uint8_t sntp_apply_parsed_time(int year, int month, int day, int hh, int mm, int ss);
+
+static uint8_t sntp_parse_epoch_digits(const char *s)
 {
-    char wday[12];
+    const char *p = s;
+    uint64_t v = 0u;
+    uint8_t nd = 0u;
+    uint64_t sec;
+    int year, month, day, hh, mm, ss;
+
+    if(s == NULL) {
+        return 0u;
+    }
+    while(*p != '\0') {
+        if(*p >= '0' && *p <= '9') {
+            if(nd == 0u) {
+                v = 0u;
+            }
+            v = v * 10u + (uint64_t)(*p - '0');
+            nd++;
+            if(nd > 13u) {
+                nd = 0u;
+            }
+        } else {
+            if(nd >= 10u) {
+                sec = v;
+                if(v > 2000000000000ull) {
+                    sec = v / 1000u;
+                }
+                if(sec > 1600000000ull &&
+                   epoch_to_local_datetime(sec, APP_ALIYUN_SNTP_TZ_HOURS, &year, &month, &day, &hh, &mm, &ss) != 0u) {
+                    return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+                }
+            }
+            nd = 0u;
+        }
+        p++;
+    }
+    if(nd >= 10u) {
+        sec = v;
+        if(v > 2000000000000ull) {
+            sec = v / 1000u;
+        }
+        if(sec > 1600000000ull &&
+           epoch_to_local_datetime(sec, APP_ALIYUN_SNTP_TZ_HOURS, &year, &month, &day, &hh, &mm, &ss) != 0u) {
+            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+    }
+    return 0u;
+}
+
+static uint8_t sntp_apply_parsed_time(int year, int month, int day, int hh, int mm, int ss)
+{
+    if(year >= 2020 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        app_home_wall_clock_set(year, month, day, hh, mm, ss);
+        s_sntp_synced = 1u;
+        s_ntp_synced = 1u;
+        TIME_TRACE_MSG("[TIME]Esp\r\n");
+        cloud_ota_service_flush_unlock_pending();
+        return 1u;
+    }
+    return 0u;
+}
+
+static uint8_t sntp_try_parse_line(const char *p)
+{
+    const char *body;
     char mon[8];
     int day = 1;
     int month = 1;
@@ -394,65 +737,229 @@ static uint8_t aliyun_try_fetch_sntp_once(void)
     int mm = 0;
     int ss = 0;
     int year = 0;
-    char *p;
 
-    /* Clear receive window to avoid matching stale content. */
-    memset(s_rx_win, 0, sizeof(s_rx_win));
-    s_rx_win_pos = 0u;
-    if(!uart2_send_text("AT+CIPSNTPTIME?\r\n")) {
-        printf("[ALIYUN] SNTP query send fail\r\n");
+    if(p == NULL) {
         return 0u;
     }
-    if(!uart2_wait_text("+CIPSNTPTIME:", ALIYUN_SNTP_QUERY_MS)) {
-        if(uart2_wait_text("ERROR", 80u)) {
-            printf("[ALIYUN] SNTP query returned ERROR\r\n");
+    body = sntp_body_ptr(p);
+    if(body == NULL || sntp_body_is_empty(body) != 0u) {
+        return 0u;
+    }
+    if(strstr(body, "1970") != NULL || strncmp(body, "NULL", 4) == 0) {
+        return 0u;
+    }
+    if(sntp_body_not_ready(body) != 0u) {
+        return 0u;
+    }
+
+    {
+        const char *tail = sntp_body_time_tail(body);
+        if(tail == NULL) {
+            tail = body;
+        }
+
+        if(sntp_parse_epoch_digits(tail) != 0u) {
+            return 1u;
+        }
+        if(sscanf(p, "+CIPSNTPTIME:%*u,\"%*[^\"]\",%*3s %3s %d %d:%d:%d %d",
+                  mon, &day, &hh, &mm, &ss, &year) == 6 ||
+           sscanf(p, "+CIPSNTPTIME:%*u,\"%*[^\"]\",%d-%d-%d,%d:%d:%d",
+                  &year, &month, &day, &hh, &mm, &ss) == 6) {
+            if(strstr(p, "+CIPSNTPTIME:") != NULL && year >= 2020) {
+                if(month < 1 || month > 12) {
+                    month = month_abbr_to_i(mon);
+                }
+                return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+            }
+        }
+        /* "1,Thu May..." / "1,2026-05-28,..." 须在 %*3s 星期格式之前 */
+        if(sscanf(tail, "%*d,%*3s %3s %d %d:%d:%d %d", mon, &day, &hh, &mm, &ss, &year) == 6) {
+            month = month_abbr_to_i(mon);
+            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+        if(sscanf(tail, "%*d,%d-%d-%d,%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6 ||
+           sscanf(tail, "%d-%d-%d,%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6) {
+            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+        if(sscanf(p, "+CIPSNTPTIME:%11s %3s %d %d:%d:%d %d", mon, &day, &hh, &mm, &ss, &year) == 6 ||
+           sscanf(p, "+CIPSNTPTIME:%d-%d-%d,%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6) {
+            if(month < 1 || month > 12) {
+                month = month_abbr_to_i(mon);
+            }
+            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+        if(sscanf(tail, "%*3s %3s %d %d:%d:%d %d", mon, &day, &hh, &mm, &ss, &year) == 6) {
+            month = month_abbr_to_i(mon);
+            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+        if(sscanf(tail, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6) {
+            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+    }
+
+#if (APP_TIME_TRACE != 0)
+    {
+        static uint8_t s_ebd_body_once;
+        if(s_ebd_body_once == 0u) {
+            const char *tail = sntp_body_time_tail(body);
+            char tb[24];
+            uint8_t i;
+            uint8_t n = 0u;
+            s_ebd_body_once = 1u;
+            TIME_TRACE_MSG("[TIME]b:");
+            if(tail == NULL) {
+                tail = body;
+            }
+            for(i = 0u; tail[i] != '\0' && n < 16u; i++) {
+                char c = tail[i];
+                if(c == '\r' || c == '\n') {
+                    break;
+                }
+                tb[n++] = (c >= 0x20 && c < 0x7f) ? c : '.';
+            }
+            tb[n++] = '\r';
+            tb[n++] = '\n';
+            tb[n] = '\0';
+            time_trace_tx(tb);
+        }
+    }
+#endif
+    TIME_TRACE_MSG("[TIME]Ebd\r\n");
+    return 0u;
+}
+
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+static uint8_t cloud_aliyun_sntp_step_active(void)
+{
+    return (s_step == ALIYUN_STEP_SNTP_CFG ||
+            s_step == ALIYUN_STEP_SNTP_WAIT ||
+            s_step == ALIYUN_STEP_SNTP_TIME) ? 1u : 0u;
+}
+
+/* SNTP 阶段收 ESP 上报（+TIME_UPDATED）；勿重复 push（read_byte 已写入 s_rx_win） */
+static void sntp_uart_pump(uint32_t duration_ms)
+{
+    uint8_t ch = 0u;
+    uint32_t end;
+
+    if(!s_uart2_inited || duration_ms == 0u) {
+        return;
+    }
+    end = HAL_GetTick() + duration_ms;
+    while((HAL_GetTick() < end) != 0u) {
+        (void)uart2_read_byte_timeout(&ch, 8u);
+        uart2_coop_yield();
+    }
+}
+#endif
+
+/* r110：短查询，清 RX 后读 +CIPSNTPTIME */
+static uint8_t aliyun_try_fetch_sntp_once(void)
+{
+    char *p;
+
+    cloud_uart2_rx_clear();
+    if(!uart2_send_text("AT+CIPSNTPTIME?\r\n")) {
+        TIME_TRACE_MSG("[TIME]Esf\r\n");
+        return 0u;
+    }
+    if(!uart2_wait_text("+CIPSNTPTIME:", ALIYUN_SNTP_QUERY_MS) &&
+       !uart2_wait_text("+CIPSNTP:", 400u)) {
+        if(strstr(s_rx_win, "ERROR") != NULL) {
+            TIME_TRACE_MSG("[TIME]Eer\r\n");
         } else {
-            printf("[ALIYUN] SNTP query no time response yet\r\n");
+            TIME_TRACE_MSG("[TIME]Enl\r\n");
         }
         return 0u;
     }
-    p = strstr(s_rx_win, "+CIPSNTPTIME:");
-    if(p == NULL) return 0u;
-    printf("[ALIYUN] SNTP raw: %.80s\r\n", p);
-    if(strncmp(p, "+CIPSNTPTIME:\r", 14u) == 0 || strncmp(p, "+CIPSNTPTIME:\n", 14u) == 0 ||
-       strncmp(p, "+CIPSNTPTIME:", 13u) == 0) {
-        s_sntp_empty_cnt++;
-    } else {
-        s_sntp_empty_cnt = 0u;
-    }
-
-    /* ESP AT variants may return different formats; try a few. */
-    if(sscanf(p, "+CIPSNTPTIME:%11s %3s %d %d:%d:%d %d", wday, mon, &day, &hh, &mm, &ss, &year) == 7 ||
-       sscanf(p, "+CIPSNTPTIME:\"%11s %3s %d %d:%d:%d %d\"", wday, mon, &day, &hh, &mm, &ss, &year) == 7) {
-        month = month_abbr_to_i(mon);
-    } else if(sscanf(p, "+CIPSNTPTIME:%d-%d-%d,%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6 ||
-              sscanf(p, "+CIPSNTPTIME:\"%d-%d-%d,%d:%d:%d\"", &year, &month, &day, &hh, &mm, &ss) == 6) {
-        /* already parsed as numeric Y-M-D H:M:S */
-    } else {
-        printf("[ALIYUN] SNTP parse failed\r\n");
+    p = (char *)sntp_find_last_line(s_rx_win);
+    if(p == NULL) {
+        TIME_TRACE_MSG("[TIME]Enl\r\n");
         return 0u;
     }
-
-    if(year >= 2020 && month >= 1 && month <= 12) {
-        app_home_wall_clock_set(year, month, day, hh, mm, ss);
-        printf("[ALIYUN] SNTP synced: %04d-%02d-%02d %02d:%02d:%02d\r\n",
-               year, month, day, hh, mm, ss);
-        s_sntp_synced = 1u;
+    if(sntp_try_parse_line(p) != 0u) {
+        s_sntp_empty_cnt = 0u;
         return 1u;
     }
-    printf("[ALIYUN] SNTP got invalid time y=%d m=%d d=%d\r\n", year, month, day);
+    s_sntp_empty_cnt++;
+    TIME_TRACE_MSG("[TIME]Ebd\r\n");
     return 0u;
 }
 #endif
 
+static uint8_t aliyun_connack_scan_bytes(const uint8_t *buf, uint16_t len)
+{
+    uint16_t i;
+
+    if(buf == NULL || len < 4u) {
+        return 0xFFu;
+    }
+    for(i = 0u; (uint16_t)(i + 3u) < len; i++) {
+        if(buf[i] == 0x20u && buf[i + 1u] == 0x02u) {
+            if(buf[i + 3u] == 0u) {
+                return 1u;
+            }
+            printf("[ALIYUN] CONNACK denied code=%u\r\n", (unsigned)buf[i + 3u]);
+            CLOUD_TRACE_MSG("[CLOUD] MQTT auth fail\r\n");
+            app_link_guard_mqtt_end(0u);
+            return 0u;
+        }
+    }
+    return 0xFFu;
+}
+
+/* 等待 MQTT CONNACK（+IPD 二进制 0x20 0x02 ...） */
+static uint8_t aliyun_wait_mqtt_connack(uint32_t timeout_ms)
+{
+    uint8_t ack[64];
+    uint16_t ack_len = 0u;
+    uint8_t hit;
+    uint8_t ch = 0u;
+    uint32_t deadline = HAL_GetTick() + timeout_ms;
+
+    hit = aliyun_connack_scan_bytes((const uint8_t *)s_rx_win, s_rx_win_pos);
+    if(hit <= 1u) {
+        return hit;
+    }
+
+    while((int32_t)(HAL_GetTick() - (int32_t)deadline) < 0) {
+        while(uart2_read_byte_timeout(&ch, 6u) != 0) {
+            hit = aliyun_connack_scan_bytes((const uint8_t *)s_rx_win, s_rx_win_pos);
+            if(hit <= 1u) {
+                return hit;
+            }
+        }
+        if(uart2_recv_ipd_payload(ack, sizeof(ack), &ack_len, 80u) != 0) {
+            hit = aliyun_connack_scan_bytes(ack, ack_len);
+            if(hit <= 1u) {
+                return hit;
+            }
+        }
+        uart2_coop_yield();
+    }
+
+    hit = aliyun_connack_scan_bytes((const uint8_t *)s_rx_win, s_rx_win_pos);
+    return (hit == 1u) ? 1u : 0u;
+}
+
 static uint8_t mqtt_send_packet(const uint8_t *pkt, uint16_t pkt_len)
 {
     char cmd[40];
-    if(pkt == NULL || pkt_len == 0u) return 0u;
-    snprintf(cmd, sizeof(cmd), "AT+CIPSEND=0,%u\r\n", (unsigned)pkt_len);
-    if(!(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_WAIT_MID_MS))) return 0u;
-    if(!uart2_send_bytes(pkt, pkt_len)) return 0u;
-    return uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS) ? 1u : 0u;
+    uint8_t try;
+
+    if(pkt == NULL || pkt_len == 0u) {
+        return 0u;
+    }
+    for(try = 0u; try < 2u; try++) {
+        snprintf(cmd, sizeof(cmd), "AT+CIPSEND=0,%u\r\n", (unsigned)pkt_len);
+        if(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_WAIT_MID_MS) &&
+           uart2_send_bytes(pkt, pkt_len) &&
+           uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS)) {
+            return 1u;
+        }
+        (void)cloud_uart2_pump_rx(40u);
+    }
+    return 0u;
 }
 
 static void esp_rst_gpio_init_once(void)
@@ -586,8 +1093,10 @@ static int uart2_wait_text(const char *needle, uint32_t timeout_ms)
     nlen = (uint16_t)strlen(needle);
     if(nlen >= sizeof(s_rx_win)) return 0;
     if(timeout_ms == 0u) return 0;
+    if(strstr(s_rx_win, needle) != NULL) return 1;
 
     while((HAL_GetTick() - start) < timeout_ms) {
+        if(strstr(s_rx_win, needle) != NULL) return 1;
         if(uart2_read_byte_timeout(&ch, 1u) != 0) {
             if(strstr(s_rx_win, needle) != NULL) {
                 return 1;
@@ -668,7 +1177,7 @@ static void cwjap_build_cmd(char *cmd, size_t cmd_sz)
         cmd[n++] = *pwd++;
     }
     cmd[n++] = '"';
-    if(ch >= 1u && ch <= 14u && (n + 4u) < cmd_sz) {
+    if(s_cwjap_try_channel != 0u && ch >= 1u && ch <= 14u && (n + 4u) < cmd_sz) {
         cmd[n++] = ',';
         if(ch >= 10u) {
             cmd[n++] = (char)('0' + (ch / 10u));
@@ -682,8 +1191,24 @@ static void cwjap_build_cmd(char *cmd, size_t cmd_sz)
 
 static void cwjap_uart_settle(void)
 {
-    cloud_uart2_hw_drain_ms(300u);
-    cloud_uart2_wait_quiet_after_scan_abort(1500u);
+    /* 默认软清理：硬件复位常等不到 ready，反而导致 busy p */
+    cwjap_modem_purge(0u);
+}
+
+/* connect 前已 teardown_idle：勿再连发十几条 AT，否则 CWJAP 易 busy p */
+static void cwjap_uart_settle_fast(void)
+{
+    CWJAP_TRACE_MSG("[WiFi] CWJAP fast settle\r\n");
+    g_wifi_scan_abort = 1u;
+    g_wifi_scan_pending = 0u;
+    cloud_uart2_flush_rx();
+    cloud_uart2_wait_quiet_after_scan_abort(CWJAP_FAST_SETTLE_QUIET_MS);
+    cloud_uart2_rx_clear();
+    if(uart2_at_cmd_wait_ok("AT\r\n", CWJAP_FAST_SETTLE_AT_MS) != 0u) {
+        s_modem_at_ok = 1u;
+    } else {
+        s_modem_at_ok = 0u;
+    }
     cloud_uart2_rx_clear();
 }
 
@@ -701,6 +1226,8 @@ static void cwjap_trace_fail_reason(void)
         CWJAP_TRACE_MSG("[WiFi] CWJAP reason: assoc fail\r\n");
     } else if(cloud_uart2_rx_has("busy p") != 0) {
         CWJAP_TRACE_MSG("[WiFi] CWJAP reason: busy p\r\n");
+    } else if(cloud_uart2_rx_has("WIFI DISCONNECT") != 0) {
+        CWJAP_TRACE_MSG("[WiFi] CWJAP reason: disconnect\r\n");
     } else if(cloud_uart2_rx_has("+CWJAP:") != 0) {
         CWJAP_TRACE_MSG("[WiFi] CWJAP reason: auth/assoc fail\r\n");
     } else if(cloud_uart2_rx_has("FAIL") != 0) {
@@ -711,6 +1238,36 @@ static void cwjap_trace_fail_reason(void)
     cwjap_trace_rx_tail();
 }
 
+/* 发 CWJAP；若立即 busy p 则静默后重发（不再插 AT 探活） */
+static int cwjap_send_cmd_wait(const char *cmd, uint32_t timeout_ms)
+{
+    uint8_t n;
+
+    if(cmd == NULL || cmd[0] == '\0') {
+        return 0;
+    }
+    for(n = 0u; n < 3u; n++) {
+        cloud_uart2_rx_clear();
+        if(!uart2_send_text(cmd)) {
+            continue;
+        }
+        {
+            int r = uart2_wait_wifi_sta_connected(timeout_ms);
+
+            if(r > 0) {
+                return 1;
+            }
+            if(strstr(s_rx_win, "busy p") != NULL && n < 2u) {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP busy wait\r\n");
+                cloud_uart2_wait_quiet_after_scan_abort(CWJAP_BUSY_RESEND_QUIET_MS);
+                continue;
+            }
+            return r;
+        }
+    }
+    return 0;
+}
+
 static int uart2_wait_wifi_sta_connected(uint32_t timeout_ms)
 {
     uint8_t ch = 0u;
@@ -719,7 +1276,7 @@ static int uart2_wait_wifi_sta_connected(uint32_t timeout_ms)
     if(timeout_ms == 0u) {
         return 0;
     }
-    cloud_uart2_rx_clear();
+    /* 勿在此 clear：会擦掉 CWJAP 刚返回的 busy p / FAIL */
     while((HAL_GetTick() - start) < timeout_ms) {
         if(uart2_read_byte_timeout(&ch, 1u) != 0) {
             if(strstr(s_rx_win, "WIFI GOT IP") != NULL) {
@@ -729,8 +1286,7 @@ static int uart2_wait_wifi_sta_connected(uint32_t timeout_ms)
                strstr(s_rx_win, "FAIL") != NULL ||
                strstr(s_rx_win, "busy p") != NULL ||
                strstr(s_rx_win, "no ap") != NULL ||
-               strstr(s_rx_win, "NO AP") != NULL ||
-               strstr(s_rx_win, "WIFI DISCONNECT") != NULL) {
+               strstr(s_rx_win, "NO AP") != NULL) {
                 printf("[ALIYUN] CWJAP wait fail token rx=%s\r\n", s_rx_win);
                 return -1;
             }
@@ -742,8 +1298,16 @@ static int uart2_wait_wifi_sta_connected(uint32_t timeout_ms)
     }
     if(strstr(s_rx_win, "+CWJAP:") != NULL ||
        strstr(s_rx_win, "FAIL") != NULL ||
-       strstr(s_rx_win, "busy p") != NULL) {
+       strstr(s_rx_win, "busy p") != NULL ||
+       strstr(s_rx_win, "no ap") != NULL ||
+       strstr(s_rx_win, "NO AP") != NULL) {
         printf("[ALIYUN] CWJAP wait fail(last) rx=%s\r\n", s_rx_win);
+        return -1;
+    }
+    if(strstr(s_rx_win, "WIFI DISCONNECT") != NULL &&
+       strstr(s_rx_win, "WIFI GOT IP") == NULL &&
+       strstr(s_rx_win, "WIFI CONNECTED") == NULL) {
+        printf("[ALIYUN] CWJAP wait disconnect rx=%s\r\n", s_rx_win);
         return -1;
     }
     printf("[ALIYUN] CWJAP wait timeout %lums (no GOT IP) rx=%s\r\n",
@@ -804,6 +1368,92 @@ static int uart2_read_byte_timeout(uint8_t *out, uint32_t timeout_ms)
     return 0;
 }
 
+static uint16_t ipd_parse_len_field(const char *hdr, const char *colon)
+{
+    uint16_t last_num = 0u;
+    uint16_t curr_num = 0u;
+    uint8_t saw_digit = 0u;
+    const char *q;
+
+    if(hdr == NULL || colon == NULL || colon <= hdr) {
+        return 0u;
+    }
+    for(q = hdr + 5; q < colon; q++) {
+        if(*q >= '0' && *q <= '9') {
+            curr_num = (uint16_t)(curr_num * 10u + (uint16_t)(*q - '0'));
+            saw_digit = 1u;
+            if(curr_num > 2048u) {
+                return 0u;
+            }
+        } else if(*q == ',') {
+            if(saw_digit != 0u) {
+                last_num = curr_num;
+                curr_num = 0u;
+                saw_digit = 0u;
+            }
+        }
+    }
+    if(saw_digit != 0u) {
+        last_num = curr_num;
+    }
+    return last_num;
+}
+
+static void rx_win_consume(uint16_t nbytes)
+{
+    if(nbytes == 0u) {
+        return;
+    }
+    if(nbytes >= s_rx_win_pos) {
+        s_rx_win_pos = 0u;
+        s_rx_win[0] = '\0';
+        return;
+    }
+    memmove(s_rx_win, s_rx_win + nbytes, (size_t)(s_rx_win_pos - nbytes));
+    s_rx_win_pos = (uint16_t)(s_rx_win_pos - nbytes);
+    s_rx_win[s_rx_win_pos] = '\0';
+}
+
+static int uart2_ipd_take_from_rx_win(uint8_t *payload, uint16_t payload_sz, uint16_t *out_len)
+{
+    char *hdr;
+    char *colon;
+    uint16_t len;
+    uint16_t hdr_end;
+    uint16_t in_win;
+    uint16_t copy_n;
+    uint16_t i;
+
+    hdr = strstr(s_rx_win, "+IPD,");
+    if(hdr == NULL) {
+        return 0;
+    }
+    colon = strchr(hdr, ':');
+    if(colon == NULL) {
+        return 0;
+    }
+    len = ipd_parse_len_field(hdr, colon);
+    if(len == 0u) {
+        return 0;
+    }
+    hdr_end = (uint16_t)((colon + 1) - s_rx_win);
+    in_win = (s_rx_win_pos > hdr_end) ? (uint16_t)(s_rx_win_pos - hdr_end) : 0u;
+    copy_n = (len < payload_sz) ? len : payload_sz;
+    if(payload != NULL && copy_n > 0u) {
+        for(i = 0u; i < copy_n; i++) {
+            payload[i] = (uint8_t)s_rx_win[hdr_end + i];
+        }
+    }
+    if(in_win < len) {
+        return 0;
+    }
+    rx_win_consume((uint16_t)(hdr_end + len));
+    if(out_len != NULL) {
+        *out_len = copy_n;
+    }
+    return 1;
+}
+
 static int uart2_recv_ipd_payload(uint8_t *payload, uint16_t payload_sz, uint16_t *out_len, uint32_t timeout_ms)
 {
     uint8_t ch = 0u;
@@ -814,39 +1464,74 @@ static int uart2_recv_ipd_payload(uint8_t *payload, uint16_t payload_sz, uint16_
     uint16_t len = 0u;
     uint16_t i;
     uint16_t copy_n = 0u;
+    char *hdr;
+    char *colon;
 
-    if(out_len != NULL) *out_len = 0u;
-    if(!uart2_wait_text("+IPD,", timeout_ms)) return 0;
+    if(out_len != NULL) {
+        *out_len = 0u;
+    }
+    (void)cloud_uart2_pump_rx(12u);
+    if(uart2_ipd_take_from_rx_win(payload, payload_sz, out_len) != 0) {
+        return 1;
+    }
 
-    /* Parse header: support both +IPD,<id>,<len>: and +IPD,<len>: */
+    if(!uart2_wait_text("+IPD,", timeout_ms)) {
+        return 0;
+    }
+
+    hdr = strstr(s_rx_win, "+IPD,");
+    colon = (hdr != NULL) ? strchr(hdr, ':') : NULL;
+    if(hdr != NULL && colon != NULL) {
+        if(uart2_ipd_take_from_rx_win(payload, payload_sz, out_len) != 0) {
+            return 1;
+        }
+    }
+
+    start = HAL_GetTick();
     while((HAL_GetTick() - start) < timeout_ms) {
-        if(!uart2_read_byte_timeout(&ch, 2u)) continue;
+        if(!uart2_read_byte_timeout(&ch, 2u)) {
+            continue;
+        }
         if(ch == ':') {
-            if(saw_digit) last_num = curr_num;
+            if(saw_digit != 0u) {
+                last_num = curr_num;
+            }
             break;
         }
         if(ch >= '0' && ch <= '9') {
             saw_digit = 1u;
             curr_num = (uint16_t)(curr_num * 10u + (uint16_t)(ch - '0'));
-            if(curr_num > 2048u) return 0;
+            if(curr_num > 2048u) {
+                return 0;
+            }
         } else if(ch == ',') {
-            if(saw_digit) {
+            if(saw_digit != 0u) {
                 last_num = curr_num;
                 curr_num = 0u;
                 saw_digit = 0u;
             }
         }
     }
-    if(ch != ':') return 0;
+    if(ch != ':') {
+        return 0;
+    }
     len = last_num;
-    if(len == 0u) return 0;
+    if(len == 0u) {
+        return 0;
+    }
     copy_n = (len < payload_sz) ? len : payload_sz;
 
     for(i = 0u; i < len; i++) {
-        if(!uart2_read_byte_timeout(&ch, 20u)) return 0;
-        if(i < copy_n && payload != NULL) payload[i] = ch;
+        if(!uart2_read_byte_timeout(&ch, 20u)) {
+            return 0;
+        }
+        if(i < copy_n && payload != NULL) {
+            payload[i] = ch;
+        }
     }
-    if(out_len != NULL) *out_len = copy_n;
+    if(out_len != NULL) {
+        *out_len = copy_n;
+    }
     return 1;
 }
 
@@ -863,12 +1548,23 @@ static uint8_t aliyun_send_ping_and_check(void)
     if(!uart2_send_bytes(ping_pkt, 2u)) return 0u;
     if(!uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS)) return 0u;
 
-    /* There may be other downlink packets (e.g. NTP response) before PINGRESP. */
+    /* 先解析 NTP 应答，勿把 +IPD 当 ping 直接 consume 掉 */
     deadline = HAL_GetTick() + ALIYUN_WAIT_MID_MS;
     while((int32_t)(HAL_GetTick() - deadline) < 0) {
-        if(!uart2_recv_ipd_payload(resp, sizeof(resp), &rlen, 60u)) continue;
+        uart2_drain_rx_ms(40u);
+        if(s_ntp_synced == 0u && aliyun_ntp_try_parse_any() != 0u) {
+            return 1u;
+        }
+        if(!uart2_recv_ipd_payload(resp, sizeof(resp), &rlen, 60u)) {
+            continue;
+        }
+        if(s_ntp_synced == 0u && aliyun_ntp_apply_from_mqtt_chunk(resp, rlen) != 0u) {
+            return 1u;
+        }
         for(i = 0u; (uint16_t)(i + 1u) < rlen; i++) {
-            if(resp[i] == 0xD0u && resp[i + 1u] == 0x00u) return 1u; /* MQTT PINGRESP */
+            if(resp[i] == 0xD0u && resp[i + 1u] == 0x00u) {
+                return 1u; /* MQTT PINGRESP */
+            }
         }
     }
     return 0u;
@@ -1013,23 +1709,29 @@ static uint16_t build_mqtt_subscribe_qos0(uint8_t *out, uint16_t out_sz, uint16_
     return pos;
 }
 
-static uint8_t parse_ntp_server_send_time_ms(const uint8_t *buf, uint16_t len, uint64_t *out_ms)
+static uint8_t parse_ntp_json_u64_ms(const uint8_t *buf, uint16_t len, const char *key, uint64_t *out_ms)
 {
-    const char key[] = "serverSendTime";
     uint16_t i;
-    if(buf == NULL || out_ms == NULL) return 0u;
-    for(i = 0u; i + (uint16_t)sizeof(key) < len; i++) {
-        if(memcmp(&buf[i], key, sizeof(key) - 1u) == 0) {
-            uint16_t j = (uint16_t)(i + (uint16_t)sizeof(key) - 1u);
+    uint16_t klen;
+
+    if(buf == NULL || key == NULL || out_ms == NULL) {
+        return 0u;
+    }
+    klen = (uint16_t)strlen(key);
+    for(i = 0u; i + klen < len; i++) {
+        if(memcmp(&buf[i], key, klen) == 0) {
+            uint16_t j = (uint16_t)(i + klen);
             uint64_t v = 0u;
             uint8_t hit_digit = 0u;
-            while(j < len && (buf[j] == ' ' || buf[j] == '"' || buf[j] == ':' || buf[j] == '\t')) j++;
+            while(j < len && (buf[j] == ' ' || buf[j] == '"' || buf[j] == ':' || buf[j] == '\t')) {
+                j++;
+            }
             while(j < len && buf[j] >= '0' && buf[j] <= '9') {
                 v = v * 10u + (uint64_t)(buf[j] - '0');
                 hit_digit = 1u;
                 j++;
             }
-            if(hit_digit) {
+            if(hit_digit != 0u) {
                 *out_ms = v;
                 return 1u;
             }
@@ -1084,42 +1786,204 @@ static uint8_t epoch_to_local_datetime(uint64_t epoch_sec, int tz_hour, int *y, 
 }
 
 #if (APP_ALIYUN_AT_ENABLE == 1)
+static uint64_t ntp_norm_server_ms(uint64_t v)
+{
+    if(v >= 1000000000000ull) {
+        return v;
+    }
+    if(v >= 1000000000ull) {
+        return v * 1000ull;
+    }
+    return 0u;
+}
+
+static uint8_t aliyun_ntp_apply_from_buf(const uint8_t *buf, uint16_t len)
+{
+    uint64_t server_recv = 0u;
+    uint64_t server_send = 0u;
+    uint64_t server_recv_ms = 0u;
+    uint64_t server_send_ms = 0u;
+    uint64_t device_recv;
+    uint64_t device_send;
+    uint64_t accurate_ms;
+    uint16_t i;
+    int y, mo, d, h, mi, s;
+
+    if(buf == NULL || len == 0u) {
+        return 0u;
+    }
+    if(parse_ntp_json_u64_ms(buf, len, "serverSendTime", &server_send) == 0u &&
+       parse_ntp_json_u64_ms(buf, len, "serverRecvTime", &server_send) == 0u) {
+        for(i = 0u; i < len; i++) {
+            if(buf[i] == '{') {
+                uint16_t sub = (uint16_t)(len - i);
+                if(parse_ntp_json_u64_ms(buf + i, sub, "serverSendTime", &server_send) != 0u ||
+                   parse_ntp_json_u64_ms(buf + i, sub, "serverRecvTime", &server_send) != 0u) {
+                    break;
+                }
+                return 0u;
+            }
+        }
+        if(server_send == 0u) {
+            return 0u;
+        }
+    }
+    server_send_ms = ntp_norm_server_ms(server_send);
+    if(server_send_ms == 0u) {
+        return 0u;
+    }
+    device_send = (uint64_t)s_ntp_req_dev_ms;
+    device_recv = (uint64_t)HAL_GetTick();
+    /* 勿把 HAL_GetTick 与 Unix ms 直接相加平均（会得到 1998 等错误年份） */
+    accurate_ms = server_send_ms;
+    if(parse_ntp_json_u64_ms(buf, len, "serverRecvTime", &server_recv) != 0u) {
+        server_recv_ms = ntp_norm_server_ms(server_recv);
+        if(server_recv_ms != 0u) {
+            accurate_ms = (server_send_ms + server_recv_ms) / 2u;
+        }
+    }
+    if(device_recv > device_send) {
+        accurate_ms += (device_recv - device_send) / 2u;
+    }
+    if(accurate_ms < 1000000000000ull) {
+        TIME_TRACE_MSG("[TIME]Mbd\r\n");
+        return 0u;
+    }
+    if(epoch_to_local_datetime(accurate_ms / 1000u, APP_ALIYUN_SNTP_TZ_HOURS, &y, &mo, &d, &h, &mi, &s) == 0u) {
+        TIME_TRACE_MSG("[TIME]Mbd\r\n");
+        return 0u;
+    }
+    if(y < 2020) {
+        TIME_TRACE_MSG("[TIME]Mby\r\n");
+        return 0u;
+    }
+    app_home_wall_clock_set(y, mo, d, h, mi, s);
+    s_ntp_synced = 1u;
+    s_sntp_synced = 1u;
+    s_ntp_await_until_ms = 0u;
+    s_ntp_give_up = 0u;
+    TIME_TRACE_MSG("[TIME]Mok\r\n");
+    cloud_ota_service_flush_unlock_pending();
+    return 1u;
+}
+
+/* MQTT PUBLISH 二进制帧内查找 JSON 再解析 serverSendTime */
+static uint8_t aliyun_ntp_apply_from_mqtt_chunk(const uint8_t *chunk, uint16_t len)
+{
+    uint16_t i;
+
+    if(chunk == NULL || len == 0u) {
+        return 0u;
+    }
+    if(aliyun_ntp_apply_from_buf(chunk, len) != 0u) {
+        return 1u;
+    }
+    for(i = 0u; i < len; i++) {
+        if(chunk[i] == '{') {
+            if(aliyun_ntp_apply_from_buf(chunk + i, (uint16_t)(len - i)) != 0u) {
+                return 1u;
+            }
+        }
+    }
+    return 0u;
+}
+
+/* 扫描 s_rx_win 中全部 +IPD；仅 NTP 解析成功才 consume（避免 SUBACK 吃掉应答） */
+static uint8_t aliyun_ntp_try_all_ipd_in_rx_win(void)
+{
+    char *hdr;
+    char *colon;
+    char *next;
+    uint16_t len;
+    uint16_t hdr_end;
+    uint16_t in_win;
+    uint16_t i;
+    uint8_t chunk[384];
+
+    hdr = s_rx_win;
+    while(hdr != NULL && (hdr = strstr(hdr, "+IPD,")) != NULL) {
+        colon = strchr(hdr, ':');
+        if(colon == NULL) {
+            break;
+        }
+        len = ipd_parse_len_field(hdr, colon);
+        if(len == 0u || len > sizeof(chunk)) {
+            hdr = colon + 1;
+            continue;
+        }
+        hdr_end = (uint16_t)((colon + 1) - s_rx_win);
+        in_win = (s_rx_win_pos > hdr_end) ? (uint16_t)(s_rx_win_pos - hdr_end) : 0u;
+        if(in_win < len) {
+            return 0u;
+        }
+        for(i = 0u; i < len; i++) {
+            chunk[i] = (uint8_t)s_rx_win[hdr_end + i];
+        }
+        if(aliyun_ntp_apply_from_mqtt_chunk(chunk, len) != 0u) {
+            rx_win_consume((uint16_t)(hdr_end + len));
+            return 1u;
+        }
+        next = colon + 1;
+        if(next >= &s_rx_win[s_rx_win_pos]) {
+            break;
+        }
+        hdr = next;
+    }
+    return 0u;
+}
+
+static uint8_t aliyun_ntp_try_parse_any(void)
+{
+    if(strstr(s_rx_win, "serverSendTime") != NULL &&
+       aliyun_ntp_apply_from_buf((const uint8_t *)s_rx_win, s_rx_win_pos) != 0u) {
+        return 1u;
+    }
+    return aliyun_ntp_try_all_ipd_in_rx_win();
+}
+
+/* r110 同款：MQTT 在线后非阻塞 NTP（Msb→Mrq→收 +IPD→Mok），不阻塞 UI */
 static void aliyun_ntp_try_sync_online(void)
 {
     uint8_t pkt[256];
     uint16_t pkt_len;
-    uint8_t rx[320];
+    uint8_t rx[384];
     uint16_t rx_len = 0u;
-    uint64_t ms = 0u;
-    int y, mo, d, h, mi, s;
-    const char req_payload[] = "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{}}";
+    static const char req_payload[] = "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{}}";
 
-    if(s_ntp_synced) return;
+    if(s_ntp_synced != 0u || app_wall_clock_valid() != 0u) {
+        s_ntp_synced = 1u;
+        return;
+    }
+    if(s_ntp_connect_tried == 0u) {
+        return;
+    }
 
-    if(!s_ntp_subscribed) {
+    uart2_drain_rx_ms(30u);
+    if(aliyun_ntp_try_parse_any() != 0u) {
+        return;
+    }
+
+    if(s_ntp_sub_sess == 0u) {
         pkt_len = build_mqtt_subscribe_qos0(pkt, sizeof(pkt), s_mqtt_pkt_id++, s_ntp_resp_topic);
-        if(pkt_len > 0u && mqtt_send_packet(pkt, pkt_len)) {
-            s_ntp_subscribed = 1u;
-        } else {
+        if(pkt_len == 0u || mqtt_send_packet(pkt, pkt_len) == 0u) {
             return;
         }
+        s_ntp_sub_sess = 1u;
+        TIME_TRACE_MSG("[TIME]Msb\r\n");
     }
 
-    if((HAL_GetTick() - s_ntp_next_request_ms) >= ALIYUN_MQTT_NTP_RETRY_MS || s_ntp_next_request_ms == 0u) {
+    if(s_ntp_next_request_ms == 0u ||
+       (int32_t)(HAL_GetTick() - (int32_t)s_ntp_next_request_ms) >= (int32_t)ALIYUN_MQTT_NTP_RETRY_ONLINE_MS) {
         pkt_len = build_mqtt_publish_qos0(pkt, sizeof(pkt), s_ntp_req_topic, req_payload);
-        if(pkt_len > 0u && mqtt_send_packet(pkt, pkt_len)) {
+        if(pkt_len > 0u && mqtt_send_packet(pkt, pkt_len) != 0u) {
+            s_ntp_req_dev_ms = HAL_GetTick();
             s_ntp_next_request_ms = HAL_GetTick();
+            TIME_TRACE_MSG("[TIME]Mrq\r\n");
         }
     }
 
-    if(uart2_recv_ipd_payload(rx, sizeof(rx), &rx_len, 10u)) {
-        if(parse_ntp_server_send_time_ms(rx, rx_len, &ms)) {
-            if(epoch_to_local_datetime(ms / 1000u, APP_ALIYUN_SNTP_TZ_HOURS, &y, &mo, &d, &h, &mi, &s)) {
-                app_home_wall_clock_set(y, mo, d, h, mi, s);
-                s_ntp_synced = 1u;
-                printf("[ALIYUN] MQTT-NTP synced: %04d-%02d-%02d %02d:%02d:%02d\r\n", y, mo, d, h, mi, s);
-            }
-        }
+    if(uart2_recv_ipd_payload(rx, sizeof(rx), &rx_len, 20u) != 0) {
+        (void)aliyun_ntp_apply_from_mqtt_chunk(rx, rx_len);
     }
 }
 #endif
@@ -1166,13 +2030,15 @@ void cloud_aliyun_at_init(void)
     s_last_step_log = ALIYUN_STEP_IDLE;
     s_at_fail_cnt = 0u;
     s_cipmode_fail_cnt = 0u;
+    s_cipmux1_ok = 0u;
+    s_mqtt_fast_join = 0u;
+    s_cipsend_retry_cnt = 0u;
     s_last_ping_ms = HAL_GetTick();
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
     s_sntp_synced = 0u;
     s_sntp_retry_online_ms = HAL_GetTick();
     s_http_date_tried = 0u;
 #endif
-    s_ntp_subscribed = 0u;
     s_ntp_synced = 0u;
     s_ntp_next_request_ms = 0u;
     s_mqtt_pkt_id = 1u;
@@ -1235,6 +2101,15 @@ uint8_t cloud_aliyun_at_is_online(void)
 #endif
 }
 
+uint8_t cloud_aliyun_at_mqtt_connecting(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    return (s_step >= ALIYUN_STEP_CIPSTART && s_step <= ALIYUN_STEP_WAIT_CONNACK) ? 1u : 0u;
+#else
+    return 0u;
+#endif
+}
+
 void cloud_uart2_ensure_init(void)
 {
     uart2_init_once();
@@ -1286,6 +2161,12 @@ void cloud_uart2_pump_rx(uint32_t duration_ms)
     uint8_t ch = 0u;
     uint32_t end;
 
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+    if(cloud_aliyun_sntp_step_active() != 0u) {
+        sntp_uart_pump(duration_ms);
+        return;
+    }
+#endif
     if(s_uart_ui_busy != 0u) {
         return;
     }
@@ -1293,9 +2174,7 @@ void cloud_uart2_pump_rx(uint32_t duration_ms)
     if(duration_ms == 0u) return;
     end = HAL_GetTick() + duration_ms;
     while((HAL_GetTick() < end) != 0u) {
-        if(uart2_read_byte_timeout(&ch, 8u)) {
-            cloud_uart2_rx_push_char((char)ch);
-        }
+        (void)uart2_read_byte_timeout(&ch, 8u);
         uart2_coop_yield();
     }
 }
@@ -1356,6 +2235,75 @@ static void cloud_uart2_hw_drain_ms(uint32_t ms)
     }
 }
 
+/* 读到串口连续 quiet_ms 无新字节或超过 max_ms 即停，并清 RX 窗/环形缓冲 */
+static void cloud_uart2_drain_until_idle(uint32_t max_ms, uint32_t quiet_ms)
+{
+    uint32_t t0;
+    uint32_t last_rx;
+    uint8_t ch = 0u;
+
+    if(!s_uart2_inited) {
+        return;
+    }
+    if(max_ms == 0u) {
+        max_ms = ALIYUN_MQTT_DRAIN_MAX_MS;
+    }
+    if(quiet_ms == 0u) {
+        quiet_ms = ALIYUN_MQTT_DRAIN_QUIET_MS;
+    }
+    t0 = HAL_GetTick();
+    last_rx = t0;
+    while((HAL_GetTick() - t0) < max_ms) {
+        if(uart2_read_byte_timeout(&ch, 2u) != 0) {
+            last_rx = HAL_GetTick();
+            continue;
+        }
+        if((HAL_GetTick() - last_rx) >= quiet_ms) {
+            break;
+        }
+        uart2_coop_yield();
+    }
+    cloud_uart2_rx_clear();
+    uart2_ring_clear();
+    if(s_uart2.Instance == USART2) {
+        __HAL_UART_CLEAR_OREFLAG(&s_uart2);
+        __HAL_UART_CLEAR_FEFLAG(&s_uart2);
+        __HAL_UART_CLEAR_NEFLAG(&s_uart2);
+    }
+}
+
+static void aliyun_mqtt_uart_prep(void)
+{
+    cloud_uart2_drain_until_idle(ALIYUN_MQTT_DRAIN_MAX_MS, ALIYUN_MQTT_DRAIN_QUIET_MS);
+}
+
+static void aliyun_mqtt_close_link0(void)
+{
+    cloud_uart2_drain_until_idle(60u, 10u);
+    (void)uart2_send_text("AT+CIPCLOSE=0\r\n");
+    (void)uart2_wait_text("OK", 150u);
+    (void)uart2_wait_text("CLOSED", 100u);
+    cloud_uart2_drain_until_idle(ALIYUN_MQTT_DRAIN_MAX_MS, ALIYUN_MQTT_DRAIN_QUIET_MS);
+}
+
+/* 必须是完整 OK 行，避免启动日志里的 OK 子串误判 */
+static uint8_t uart2_rx_has_ok_reply(void)
+{
+    if(cloud_uart2_rx_has("busy p") != 0) {
+        return 0u;
+    }
+    if(strstr(s_rx_win, "\r\nOK\r\n") != NULL) {
+        return 1u;
+    }
+    if(strstr(s_rx_win, "\nOK\r\n") != NULL) {
+        return 1u;
+    }
+    if(strstr(s_rx_win, "OK\r\n") != NULL && strstr(s_rx_win, "FAIL") == NULL) {
+        return 1u;
+    }
+    return 0u;
+}
+
 /* 发 AT 并等 OK；遇 busy p... 则排空后重试 */
 static uint8_t uart2_at_cmd_wait_ok(const char *cmd, uint32_t timeout_ms)
 {
@@ -1370,7 +2318,8 @@ static uint8_t uart2_at_cmd_wait_ok(const char *cmd, uint32_t timeout_ms)
         if(!uart2_send_text(cmd)) {
             continue;
         }
-        if(uart2_wait_text("OK", timeout_ms) != 0) {
+        if(uart2_wait_text("OK", timeout_ms) != 0 &&
+           uart2_rx_has_ok_reply() != 0u) {
             return 1u;
         }
         if(strstr(s_rx_win, "busy") != NULL || strstr(s_rx_win, "BUSY") != NULL) {
@@ -1449,7 +2398,7 @@ uint8_t cloud_uart2_esp_hw_reset_poll(void)
     }
     cloud_uart2_hw_drain_ms(30u);
     s_esp_rst_drain_ms += 30u;
-    if(s_esp_rst_drain_ms < 300u) {
+    if(s_esp_rst_drain_ms < 1200u) {
         return 0u;
     }
     cloud_uart2_rx_clear();
@@ -1521,7 +2470,7 @@ void cloud_uart2_prepare_for_ui_at(void)
 uint8_t cloud_aliyun_at_wifi_joined(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
-    return (s_modem_at_ok != 0u && s_step >= ALIYUN_STEP_CIFSR) ? 1u : 0u;
+    return (s_modem_at_ok != 0u && s_wifi_sta_ip_ok != 0u) ? 1u : 0u;
 #else
     return 0u;
 #endif
@@ -1684,6 +2633,11 @@ void cloud_aliyun_at_scr11_enter(void)
     if(cloud_aliyun_at_user_wifi_join_active() != 0u) {
         return;
     }
+    /* 已连 WiFi 时进 WiFi 页仅配置，勿 CIPCLOSE 打断 MQTT */
+    if(cloud_aliyun_at_wifi_link_ready() != 0u) {
+        s_scr11_mqtt_paused = 0u;
+        return;
+    }
     if(s_scr11_mqtt_paused != 0u) {
         return;
     }
@@ -1712,11 +2666,7 @@ void cloud_aliyun_at_scr11_leave(void)
            cloud_aliyun_at_wifi_bringup_active() == 0u) {
             cloud_aliyun_at_user_wifi_join_abort();
         }
-        if(s_wifi_sta_ip_ok != 0u && s_modem_at_ok != 0u) {
-            s_step = ALIYUN_STEP_CIFSR;
-            s_step_ms = HAL_GetTick();
-            printf("[ALIYUN] scr11 leave: WiFi up -> continue MQTT\r\n");
-        }
+        /* WiFi 已连且 MQTT 未暂停：保持 ONLINE/建链，勿 CIFSR 打断长连 */
         return;
     }
     s_scr11_mqtt_paused = 0u;
@@ -2281,10 +3231,8 @@ void cloud_aliyun_cwlap_scan_begin(void)
 
 void cloud_aliyun_cwlap_scan_abort(void)
 {
-    /* 仅置 abort 标志：让正在执行的 CWLAP 自己退出并清 ui_busy。
-     * 否则可能出现 CWLAP 未停但 ui_busy=0，CWJAP 插队触发 busy p... */
+    /* 仅置 abort：由 CloudTask poll 走 cwk_finish_fail(-9) 并等 ESP idle */
     g_wifi_scan_abort = 1u;
-    cloud_aliyun_at_cwlap_scan_async_abort();
 }
 
 uint8_t cloud_aliyun_cwlap_scan_active(void)
@@ -2314,6 +3262,144 @@ static void cloud_uart2_flush_rx(void)
         __HAL_UART_CLEAR_NEFLAG(&s_uart2);
     }
 }
+
+/* 复位后等 ESP-AT 打印 ready（部分模组只打版本信息，无 ready 也可靠 AT 探活） */
+static uint8_t cloud_uart2_wait_esp_ready(uint32_t timeout_ms)
+{
+    uint32_t t0 = HAL_GetTick();
+    uint8_t ch = 0u;
+
+    cloud_uart2_hw_drain_ms(2000u);
+    while((HAL_GetTick() - t0) < timeout_ms) {
+        if(uart2_read_byte_timeout(&ch, 50u) != 0) {
+            if(strstr(s_rx_win, "ready") != NULL ||
+               strstr(s_rx_win, "Ready") != NULL) {
+                return 1u;
+            }
+        } else {
+            uart2_coop_yield();
+        }
+    }
+    return 0u;
+}
+
+/* 快路径：仅清旧连接 + STA 模式，避免 skip prep 后 CWJAP 立刻 DISCONNECT */
+static uint8_t cwjap_scr11_min_prep(void)
+{
+    cloud_uart2_rx_clear();
+    (void)uart2_at_cmd_wait_ok("AT+CWQAP\r\n", 3000u);
+    cloud_uart2_hw_drain_ms(400u);
+    cloud_uart2_rx_clear();
+    if(uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", 5000u) == 0u) {
+        return 0u;
+    }
+    cloud_uart2_hw_drain_ms(800u);
+    cloud_uart2_rx_clear();
+    /* min prep 后须重新探 idle，不可沿用 connect 阶段的 esp_idle_ok */
+    s_cwjap_esp_idle_ok = 0u;
+    return 1u;
+}
+
+static uint8_t cwjap_scr11_radio_prep(void)
+{
+    cloud_uart2_rx_clear();
+    if(uart2_at_cmd_wait_ok("AT\r\n", 2000u) == 0u) {
+        return 0u;
+    }
+    cloud_uart2_rx_clear();
+    if(uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", ALIYUN_WAIT_MID_MS) == 0u) {
+        return 0u;
+    }
+    cloud_uart2_rx_clear();
+    if(uart2_at_cmd_wait_ok("AT+CIPMUX=0\r\n", ALIYUN_WAIT_SHORT_MS) == 0u) {
+        return 0u;
+    }
+    cloud_uart2_rx_clear();
+    if(uart2_at_cmd_wait_ok("AT+CIPSERVER=0\r\n", ALIYUN_WAIT_SHORT_MS) == 0u) {
+        return 0u;
+    }
+    cloud_uart2_rx_clear();
+    return 1u;
+}
+
+/* 连续 AT 探活；need_ok=2 用于 CWJAP 前，3 用于扫描 abort 收尾 */
+static uint8_t cloud_uart2_wait_modem_idle_ex(uint32_t timeout_ms, uint8_t need_ok)
+{
+    uint32_t t0 = HAL_GetTick();
+    uint8_t ok_streak = 0u;
+
+    if(need_ok < 1u) {
+        need_ok = 1u;
+    }
+    while((HAL_GetTick() - t0) < timeout_ms) {
+        cloud_uart2_rx_clear();
+        if(uart2_at_cmd_wait_ok("AT\r\n", 3000u) != 0u) {
+            ok_streak++;
+            if(ok_streak >= need_ok) {
+                return 1u;
+            }
+            cloud_uart2_hw_drain_ms(250u);
+        } else {
+            ok_streak = 0u;
+            if(strstr(s_rx_win, "busy") != NULL || strstr(s_rx_win, "BUSY") != NULL) {
+                cloud_uart2_hw_drain_ms(800u);
+            } else {
+                cloud_uart2_hw_drain_ms(300u);
+            }
+        }
+    }
+    return 0u;
+}
+
+static uint8_t cloud_uart2_wait_modem_idle(uint32_t timeout_ms)
+{
+    return cloud_uart2_wait_modem_idle_ex(timeout_ms, 3u);
+}
+
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+static void cwjap_modem_purge(uint8_t hard_reset)
+{
+    g_wifi_scan_abort = 1u;
+    g_wifi_scan_pending = 0u;
+    cloud_uart2_flush_rx();
+    if(hard_reset != 0u) {
+        CWJAP_TRACE_MSG("[WiFi] CWJAP esp reset\r\n");
+        cloud_uart2_esp_hw_reset(1200u);
+        cloud_uart2_flush_rx();
+        cloud_uart2_hw_drain_ms(500u);
+        if(cloud_uart2_wait_esp_ready(5000u) == 0u) {
+            CWJAP_TRACE_MSG("[WiFi] CWJAP wait ready timeout\r\n");
+        }
+    } else {
+        CWJAP_TRACE_MSG("[WiFi] CWJAP soft settle\r\n");
+        cloud_uart2_wait_quiet_after_scan_abort(3500u);
+        cloud_uart2_hw_drain_ms(500u);
+    }
+    cloud_uart2_flush_rx();
+    (void)uart2_send_text("ATE0\r\n");
+    (void)uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS);
+    if(cloud_uart2_wait_modem_idle(12000u) == 0u) {
+        CWJAP_TRACE_MSG("[WiFi] CWJAP modem idle fail\r\n");
+        s_modem_at_ok = 0u;
+    } else {
+        s_modem_at_ok = 1u;
+    }
+    cloud_uart2_rx_clear();
+}
+#else
+static void cwjap_modem_purge(uint8_t hard_reset)
+{
+    (void)hard_reset;
+    cloud_uart2_flush_rx();
+    cloud_uart2_esp_hw_reset(1200u);
+    (void)cloud_uart2_wait_esp_ready(5000u);
+    if(cloud_uart2_wait_modem_idle(12000u) == 0u) {
+        s_modem_at_ok = 0u;
+    } else {
+        s_modem_at_ok = 1u;
+    }
+}
+#endif
 
 static void cloud_uart2_quiet_for_cwlap(void)
 {
@@ -2379,11 +3465,33 @@ static void cwk_reset(void)
 
 void cloud_aliyun_at_cwlap_scan_async_abort(void)
 {
-    if(s_cwk.phase != CWK_IDLE) {
-        cwk_reset();
-        cloud_uart2_set_ui_busy(0u);
-        uart2_mutex_give();
+    g_wifi_scan_abort = 1u;
+}
+
+uint8_t cloud_aliyun_at_cwlap_teardown_idle(uint32_t timeout_ms)
+{
+    uint32_t quiet_ms;
+    uint32_t idle_ms;
+
+    if(timeout_ms < 2000u) {
+        timeout_ms = 2000u;
     }
+    uart2_mutex_init_once();
+    if(uart2_mutex_take(800u) == 0u) {
+        return 0u;
+    }
+    quiet_ms = (timeout_ms > CWJAP_TEARDOWN_QUIET_MS) ? CWJAP_TEARDOWN_QUIET_MS : timeout_ms;
+    idle_ms = (timeout_ms > quiet_ms) ? (timeout_ms - quiet_ms) : CWJAP_TEARDOWN_IDLE_MS;
+    if(idle_ms > CWJAP_TEARDOWN_IDLE_MS) {
+        idle_ms = CWJAP_TEARDOWN_IDLE_MS;
+    }
+    cloud_uart2_wait_quiet_after_scan_abort(quiet_ms);
+    if(cloud_uart2_wait_modem_idle(idle_ms) == 0u) {
+        uart2_mutex_give();
+        return 0u;
+    }
+    uart2_mutex_give();
+    return 1u;
 }
 
 uint8_t cloud_aliyun_at_cwlap_scan_async_active(void)
@@ -2437,9 +3545,13 @@ static int cwk_finish_ok(void)
     if(s_cwk.out_len != NULL) {
         *s_cwk.out_len = s_cwk.pos;
     }
-    /* 扫描结束后再吸收一小段尾包，避免下一个 CWJAP 命中残留 busy p。 */
-    (void)cloud_uart2_collect_to(NULL, 0u, 0u, 120u);
+    /* 扫描结束后再吸收尾包，避免 CWJAP 命中 busy p */
+    (void)cloud_uart2_collect_to(NULL, 0u, 0u, 400u);
     cloud_uart2_flush_rx();
+    cloud_uart2_wait_quiet_after_scan_abort(1500u);
+    if(cloud_uart2_wait_modem_idle(8000u) == 0u) {
+        CWJAP_TRACE_MSG("[WiFi] CWLAP finish idle fail\r\n");
+    }
     cloud_uart2_set_ui_busy(0u);
     cwk_reset();
     uart2_mutex_give();
@@ -2450,6 +3562,14 @@ static int cwk_finish_fail(int rc)
 {
     if(s_cwk.out_len != NULL) {
         *s_cwk.out_len = s_cwk.pos;
+    }
+    /* abort 时 ESP 侧 CWLAP 可能仍在跑，须等真 idle 再释放 UART */
+    if(rc == -9) {
+        CWJAP_TRACE_MSG("[WiFi] scan abort wait idle\r\n");
+        cloud_uart2_wait_quiet_after_scan_abort(5000u);
+        if(cloud_uart2_wait_modem_idle(18000u) == 0u) {
+            CWJAP_TRACE_MSG("[WiFi] scan abort idle fail\r\n");
+        }
     }
     cloud_uart2_set_ui_busy(0u);
     s_cwk.fail_rc = rc;
@@ -2510,7 +3630,7 @@ int cloud_aliyun_at_cwlap_scan_async_start(char *dst, uint16_t dst_sz, uint16_t 
     /* 尝试取 mutex；CWJAP/MQTT 正在运行时 50ms 后再试 */
     if(uart2_mutex_take(50u) == 0u) {
         WIFI_DBG("cwlap async start: mutex busy, defer");
-        return CWLAP_SCAN_RUNNING;
+        return CWLAP_SCAN_DEFERRED;
     }
     cwk_reset();
     cloud_uart2_set_ui_busy(1u);
@@ -2814,6 +3934,12 @@ uint8_t cloud_aliyun_at_cwlap_scan_async_active(void)
     return 0u;
 }
 
+uint8_t cloud_aliyun_at_cwlap_teardown_idle(uint32_t timeout_ms)
+{
+    (void)timeout_ms;
+    return 1u;
+}
+
 int cloud_aliyun_at_cwlap_scan_async_start(char *dst, uint16_t dst_sz, uint16_t *out_len)
 {
     (void)dst;
@@ -2829,17 +3955,42 @@ int cloud_aliyun_at_cwlap_scan_async_poll(void)
 
 #endif /* APP_ALIYUN_AT && APP_WIFI_UI_SCAN */
 
+#if (APP_WIFI_UART_DEBUG != 0)
 void cloud_aliyun_at_wifi_join_diag_printf(void)
 {
-#if (APP_WIFI_UART_DEBUG != 0)
     printf("[ALIYUN] join_diag step=%s join_st=%u ui_busy=%u async=%u scan_busy=%u\r\n",
            aliyun_step_name(s_step),
            (unsigned)s_user_wifi_join_st,
            (unsigned)cloud_uart2_ui_busy(),
            (unsigned)cloud_aliyun_at_cwlap_scan_async_active(),
            (unsigned)app_wifi_scan_busy());
-#else
-    (void)0;
+}
+#endif
+
+#if (APP_ALIYUN_AT_ENABLE == 1)
+static void cloud_aliyun_at_wifi_join_fail_finalize(void)
+{
+    if(s_user_wifi_join_st == 1u) {
+        s_user_wifi_join_st = 3u;
+    }
+    s_wifi_join_fail_latch = 1u;
+    cloud_uart2_set_ui_busy(0u);
+    s_cwjap_busy_retry = 0u;
+    s_cwjap_esp_idle_ok = 0u;
+    s_cwjap_light_join = 0u;
+    s_cwjap_light_need_prep = 0u;
+    s_cwjap_resend_only = 0u;
+    s_step = ALIYUN_STEP_WIFI_IDLE;
+    app_wifi_cfg_clear_reconnect_request();
+}
+#endif
+
+void cloud_aliyun_at_user_wifi_join_set_esp_idle_ok(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    s_cwjap_esp_idle_ok = 1u;
+    s_cwjap_light_join = 1u;
+    s_cwjap_light_need_prep = 0u;
 #endif
 }
 
@@ -2851,14 +4002,21 @@ void cloud_aliyun_at_user_wifi_join_start(void)
     if(!s_uart2_inited && !s_modem_at_ok) {
         s_user_wifi_join_st = 3u;
         s_step = ALIYUN_STEP_WIFI_IDLE;
+        s_cwjap_esp_idle_ok = 0u;
         CWJAP_TRACE_MSG("[WiFi] CWJAP modem not ready\r\n");
         return;
     }
+    s_wifi_join_fail_latch = 0u;
     s_user_wifi_join_st = 1u;
     s_cifsr_retry_cnt = 0u;
     s_cifsr_last_try_ms = 0u;
     s_cwjap_busy_retry = 0u;
+    s_cwjap_try_channel = 0u;
+    s_cwjap_light_need_prep = 0u;
+    /* s_cwjap_light_join 由 set_esp_idle_ok 置位；此处不清零 */
     s_cwjap_uart_settle_done = 0u;
+    s_cwjap_resend_only = 0u;
+    s_cwjap_quiet_until_ms = 0u;
     s_user_join_fail_log_ms = 0u;
     s_sta_radio_prep_done = 0u;
     s_wifi_sta_ip_ok = 0u;
@@ -2878,10 +4036,35 @@ void cloud_aliyun_at_user_wifi_join_start(void)
 #endif
 }
 
+uint8_t cloud_aliyun_at_user_wifi_join_fail_pending(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    return s_wifi_join_fail_latch;
+#else
+    return 0u;
+#endif
+}
+
+void cloud_aliyun_at_user_wifi_join_fail_clear(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    s_wifi_join_fail_latch = 0u;
+#endif
+}
+
 uint8_t cloud_aliyun_at_user_wifi_join_poll(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
     uint32_t now_ms = HAL_GetTick();
+
+    if(s_wifi_join_fail_latch != 0u) {
+        cloud_uart2_set_ui_busy(0u);
+        if(s_user_wifi_join_st == 3u) {
+            s_user_wifi_join_st = 0u;
+        }
+        CWJAP_TRACE_MSG("[WiFi] CWJAP join fail\r\n");
+        return 2u;
+    }
 
     /* join 标志已清但 FSM 仍停在 CWJAP/CIFSR：避免 GUI 层傻等 CONNECT_TIMEOUT */
     if(s_user_wifi_join_st == 0u && app_wifi_connect_busy() != 0u &&
@@ -2896,6 +4079,7 @@ uint8_t cloud_aliyun_at_user_wifi_join_poll(void)
         return 1u;
     }
     if(s_user_wifi_join_st == 3u) {
+        cloud_uart2_set_ui_busy(0u);
         if(cloud_aliyun_at_wifi_link_ready() != 0u) {
             s_user_wifi_join_st = 0u;
             return 1u;
@@ -2935,8 +4119,22 @@ uint8_t cloud_aliyun_at_user_wifi_join_active(void)
 uint8_t cloud_aliyun_at_wifi_bringup_active(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
-    if(s_step >= ALIYUN_STEP_CWJAP_SET && s_step <= ALIYUN_STEP_WAIT_CONNACK) {
+    /* 勿用 step 区间：ALIYUN_STEP_WIFI_IDLE 夹在 CWJAP_SET 与 CIFSR 之间 */
+    switch(s_step) {
+    case ALIYUN_STEP_CWJAP_SET:
+    case ALIYUN_STEP_CIFSR:
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+    case ALIYUN_STEP_SNTP_CFG:
+    case ALIYUN_STEP_SNTP_WAIT:
+    case ALIYUN_STEP_SNTP_TIME:
+#endif
+    case ALIYUN_STEP_CIPSTART:
+    case ALIYUN_STEP_CIPSEND:
+    case ALIYUN_STEP_SEND_CONNECT:
+    case ALIYUN_STEP_WAIT_CONNACK:
         return 1u;
+    default:
+        break;
     }
 #endif
     return 0u;
@@ -2946,22 +4144,82 @@ uint8_t cloud_aliyun_at_scr11_cloud_hold(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
     extern volatile app_scr_t g_app_scr;
-    if(g_app_scr == APP_SCR_11) {
+    /* WiFi 页未联网且未在连 MQTT 时才暂停 session */
+    if(g_app_scr == APP_SCR_11 && cloud_aliyun_at_wifi_link_ready() == 0u &&
+       app_link_guard_mqtt() == 0u &&
+       cloud_aliyun_at_wifi_bringup_active() == 0u) {
         return 1u;
     }
 #endif
     return 0u;
 }
 
+/* WiFi 已拿到 IP 后：未校时则先 ESP SNTP，再建 MQTT */
+static void cloud_aliyun_at_mqtt_kick_after_wifi(void)
+{
+    if(app_link_guard_wifi() != 0u) {
+        return;
+    }
+    if(s_step == ALIYUN_STEP_ONLINE) {
+        return;
+    }
+    if(cloud_aliyun_at_is_online() != 0u) {
+        return;
+    }
+    if(cloud_aliyun_at_mqtt_connecting() != 0u) {
+        return;
+    }
+    if(s_step >= ALIYUN_STEP_CIPSTART && s_step <= ALIYUN_STEP_WAIT_CONNACK) {
+        return;
+    }
+#if (APP_ALIYUN_SNTP_ENABLE == 1) && (APP_ALIYUN_SNTP_BEFORE_MQTT != 0)
+    if(app_wall_clock_valid() == 0u && s_sntp_synced == 0u && s_http_date_tried == 0u &&
+       s_step != ALIYUN_STEP_SNTP_CFG && s_step != ALIYUN_STEP_SNTP_WAIT &&
+       s_step != ALIYUN_STEP_SNTP_TIME) {
+        TIME_TRACE_MSG("[TIME]Ego\r\n");
+        s_step = ALIYUN_STEP_SNTP_CFG;
+        s_step_ms = HAL_GetTick();
+        return;
+    }
+#endif
+    if(app_link_guard_mqtt() == 0u) {
+        app_link_guard_mqtt_begin();
+    }
+    s_scr11_mqtt_paused = 0u;
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+    s_mqtt_fast_join = 1u;
+    s_cipstart_next_ms = 0u;
+#else
+    s_mqtt_fast_join = 0u;
+    s_cipstart_next_ms = HAL_GetTick() + 150u;
+#endif
+    s_step = ALIYUN_STEP_CIPSTART;
+    s_step_ms = 0u;
+}
+
 void cloud_aliyun_at_user_wifi_join_abort(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
-    if(s_user_wifi_join_st == 1u && s_step == ALIYUN_STEP_CWJAP_SET) {
+    if(s_user_wifi_join_st == 1u ||
+       s_step == ALIYUN_STEP_CWJAP_SET ||
+       s_step == ALIYUN_STEP_CIFSR) {
+        cloud_aliyun_at_wifi_join_fail_finalize();
+    }
+    s_wifi_join_fail_latch = 0u;
+    s_user_wifi_join_st = 0u;
+    s_cwjap_busy_retry = 0u;
+    s_cwjap_resend_only = 0u;
+    s_cwjap_esp_idle_ok = 0u;
+    s_cwjap_light_join = 0u;
+    s_cwjap_light_need_prep = 0u;
+    s_cwjap_try_channel = 0u;
+    if(s_step == ALIYUN_STEP_CWJAP_SET || s_step == ALIYUN_STEP_CIFSR) {
         s_step = ALIYUN_STEP_WIFI_IDLE;
         s_step_ms = HAL_GetTick();
     }
-    s_user_wifi_join_st = 0u;
     cloud_uart2_set_ui_busy(0u);
+    cloud_uart2_drain_hw(200u);
+    cloud_uart2_rx_clear();
 #else
     (void)0;
 #endif
@@ -2970,28 +4228,16 @@ void cloud_aliyun_at_user_wifi_join_abort(void)
 void cloud_aliyun_at_request_mqtt_connect(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
-    if(cloud_aliyun_at_scr11_cloud_hold() != 0u) {
-        return;
-    }
     if(s_uart_ui_busy != 0u) {
         return;
     }
-    if(app_wifi_policy_may_run_mqtt() == 0u && s_wifi_sta_ip_ok == 0u) {
+    if(cloud_aliyun_at_wifi_link_ready() == 0u) {
         return;
     }
-    if(s_step == ALIYUN_STEP_ONLINE) {
+    if(app_link_guard_wifi() != 0u) {
         return;
     }
-    /* FSM 已在 CIFSR/SNTP/MQTT 建链中，勿打断 */
-    if(s_step >= ALIYUN_STEP_CIFSR && s_step <= ALIYUN_STEP_WAIT_CONNACK) {
-        return;
-    }
-    if(s_step < ALIYUN_STEP_CIFSR) {
-        s_step = ALIYUN_STEP_CIFSR;
-    } else {
-        s_step = ALIYUN_STEP_CIPSTART;
-    }
-    s_step_ms = HAL_GetTick();
+    cloud_aliyun_at_mqtt_kick_after_wifi();
 #endif
 }
 
@@ -3013,7 +4259,7 @@ void cloud_aliyun_at_mqtt_session_disconnect(void)
 uint8_t cloud_aliyun_at_time_is_synced(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
-    return s_sntp_synced;
+    return (s_sntp_synced != 0u || s_ntp_synced != 0u) ? 1u : 0u;
 #else
     return 0u;
 #endif
@@ -3027,7 +4273,10 @@ uint8_t cloud_aliyun_at_publish_property(const char *json_payload)
     char cmd[40];
 
     if(json_payload == NULL || json_payload[0] == '\0') return 0u;
-    if(s_step != ALIYUN_STEP_ONLINE) return 0u;
+    if(s_step != ALIYUN_STEP_ONLINE) {
+        CLOUD_TRACE_MSG("[CLOUD] property skip (not online)\r\n");
+        return 0u;
+    }
 
     pkt_len = build_mqtt_publish_qos0(pkt, sizeof(pkt), s_prop_post_topic, json_payload);
     if(pkt_len == 0u) return 0u;
@@ -3036,15 +4285,13 @@ uint8_t cloud_aliyun_at_publish_property(const char *json_payload)
     if(!(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_WAIT_MID_MS))) return 0u;
     if(!uart2_send_bytes(pkt, pkt_len)) return 0u;
     if(!uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS)) {
-        s_step = ALIYUN_STEP_CIPSTART;
+        CLOUD_TRACE_MSG("[CLOUD] property post fail\r\n");
         return 0u;
     }
-    /* Drain one possible downlink frame to avoid RX desync after publish. */
-    {
-        uint8_t dump[16];
-        uint16_t dump_len = 0u;
-        (void)uart2_recv_ipd_payload(dump, sizeof(dump), &dump_len, 120u);
-        (void)dump_len;
+    CLOUD_TRACE_MSG("[CLOUD] property post ok\r\n");
+    uart2_drain_rx_ms(30u);
+    if(s_ntp_synced == 0u) {
+        (void)aliyun_ntp_try_parse_any();
     }
     return 1u;
 #else
@@ -3085,24 +4332,38 @@ void cloud_aliyun_at_poll_5ms(void)
         }
         cloud_uart2_set_ui_busy(0u);
     } else if(cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
-        return;
-    }
-
-    /* 连接中多等 mutex；平时取不到则下轮再试 */
-    if(uart2_mutex_take(s_user_wifi_join_st == 1u ? 300u : 0u) == 0u) {
-        if(s_user_wifi_join_st == 1u) {
-            static uint32_t s_join_mutex_log_ms;
-            uint32_t now = HAL_GetTick();
-            if(s_join_mutex_log_ms == 0u || (now - s_join_mutex_log_ms) >= 2000u) {
-                s_join_mutex_log_ms = now;
-                printf("[ALIYUN] CWJAP wait mutex (step=%s)\r\n", aliyun_step_name(s_step));
-            }
+        if(app_link_guard_active() != 0u) {
+            cloud_aliyun_cwlap_scan_abort();
+            cloud_aliyun_at_cwlap_scan_async_abort();
+        } else {
+            return;
         }
-        return;
     }
 
-    if(on_wifi_scr != 0u && s_scr11_mqtt_paused != 0u && s_wifi_ever_up != 0u &&
-       s_user_wifi_join_st != 1u) {
+    /* MQTT/WiFi 建链须持锁等待；timeout=0 会导致 scr11 上永远进不了 CIPSTART */
+    {
+        uint32_t mux_ms = 0u;
+        if(s_user_wifi_join_st == 1u || app_link_guard_mqtt() != 0u ||
+           app_link_guard_wifi() != 0u ||
+           cloud_aliyun_at_wifi_bringup_active() != 0u) {
+            mux_ms = 500u;
+        }
+        if(uart2_mutex_take(mux_ms) == 0u) {
+            if(s_user_wifi_join_st == 1u || app_link_guard_mqtt() != 0u) {
+                static uint32_t s_mux_log_ms;
+                uint32_t now = HAL_GetTick();
+                if(s_mux_log_ms == 0u || (now - s_mux_log_ms) >= 2000u) {
+                    s_mux_log_ms = now;
+                    CLOUD_TRACE_MSG("[CLOUD] poll mutex busy\r\n");
+                }
+            }
+            return;
+        }
+    }
+
+    /* 仅「未拿到 IP + 暂停」时让出 UART；已连 WiFi 后在 WiFi 页也继续 MQTT */
+    if(on_wifi_scr != 0u && s_scr11_mqtt_paused != 0u &&
+       s_wifi_sta_ip_ok == 0u && s_user_wifi_join_st != 1u) {
         uart2_mutex_give(); return;
     }
 
@@ -3120,7 +4381,12 @@ void cloud_aliyun_at_poll_5ms(void)
         }
     }
 
-    if(s_uart_ui_busy != 0u && s_user_wifi_join_st != 1u) {
+    if(s_uart_ui_busy != 0u && s_user_wifi_join_st != 1u &&
+       app_link_guard_mqtt() == 0u
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+       && cloud_aliyun_sntp_step_active() == 0u
+#endif
+       ) {
         uart2_mutex_give(); return;
     }
     if(app_wifi_cfg_request_reconnect() != 0u && scr11_pre_wifi == 0u) {
@@ -3129,6 +4395,9 @@ void cloud_aliyun_at_poll_5ms(void)
         s_step_ms = HAL_GetTick();
     }
     if(s_user_wifi_join_st != 1u &&
+       app_link_guard_mqtt() == 0u &&
+       s_mqtt_fast_join == 0u &&
+       cloud_aliyun_at_wifi_bringup_active() == 0u &&
        (HAL_GetTick() - s_step_ms) < ALIYUN_POLL_INTERVAL_MS) {
         uart2_mutex_give(); return;
     }
@@ -3192,18 +4461,19 @@ void cloud_aliyun_at_poll_5ms(void)
         break;
     case ALIYUN_STEP_CIPMUX:
         if(uart2_send_text("AT+CIPMUX=1\r\n") && uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS)) {
+            s_cipmux1_ok = 1u;
             s_step = ALIYUN_STEP_WIFI_IDLE;
         } else {
             printf("[ALIYUN] CIPMUX fail\r\n");
         }
         break;
     case ALIYUN_STEP_WIFI_IDLE:
-        if(g_app_scr == APP_SCR_11 && s_scr11_mqtt_paused != 0u) {
-            break;
-        }
         if(cloud_aliyun_at_sta_on_target_ssid() != 0u) {
             if(s_wifi_sta_ip_ok == 0u) {
                 s_step = ALIYUN_STEP_CIFSR;
+            } else if(cloud_aliyun_at_is_online() == 0u &&
+                      app_link_guard_active() == 0u) {
+                cloud_aliyun_at_mqtt_kick_after_wifi();
             }
             break;
         }
@@ -3247,8 +4517,6 @@ void cloud_aliyun_at_poll_5ms(void)
             static uint32_t s_cwjap_defer_log_ms = 0u;
             uint8_t uart_ready;
 
-            cloud_aliyun_cwlap_scan_abort();
-            cloud_aliyun_at_cwlap_scan_async_abort();
             cloud_uart2_set_ui_busy(0u);
             if(s_user_wifi_join_st == 1u) {
                 uart_ready = (cloud_uart2_ui_busy() == 0u) ? 1u : 0u;
@@ -3290,52 +4558,126 @@ void cloud_aliyun_at_poll_5ms(void)
             s_cwjap_defer_log_ms = 0u;
         }
         if(s_cwjap_uart_settle_done == 0u) {
-            CWJAP_TRACE_MSG("[WiFi] CWJAP uart settle\r\n");
-            cwjap_uart_settle();
+            if(s_cwjap_light_join != 0u && s_cwjap_light_need_prep == 0u &&
+               s_cwjap_resend_only == 0u) {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP light quiet\r\n");
+                cloud_uart2_flush_rx();
+                cloud_uart2_wait_quiet_after_scan_abort(CWJAP_LIGHT_QUIET_MS);
+                s_modem_at_ok = 1u;
+                s_cwjap_uart_settle_done = 1u;
+                s_sta_radio_prep_done = 1u;
+                s_cwjap_quiet_until_ms = HAL_GetTick() + CWJAP_LIGHT_HOLD_MS;
+                break;
+            }
+            if(s_cwjap_esp_idle_ok != 0u) {
+                cwjap_uart_settle_fast();
+            } else {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP uart settle\r\n");
+                cwjap_uart_settle();
+            }
             s_cwjap_uart_settle_done = 1u;
+            if(s_modem_at_ok == 0u) {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP purge fail\r\n");
+                if(s_user_wifi_join_st == 1u) {
+                    s_user_wifi_join_st = 3u;
+                }
+                s_cwjap_esp_idle_ok = 0u;
+                s_cwjap_light_join = 0u;
+                s_step = ALIYUN_STEP_WIFI_IDLE;
+                break;
+            }
+            s_cwjap_quiet_until_ms = HAL_GetTick() +
+                (s_cwjap_esp_idle_ok != 0u ? CWJAP_ESP_IDLE_HOLD_MS : 1500u);
             break;
         }
-        if(s_sta_radio_prep_done == 0u) {
-            /* 此处已持 mutex；连接前 app_wifi_scan_abort_and_wait_idle 已停 CWLAP */
+        if(s_sta_radio_prep_done == 0u && s_cwjap_resend_only == 0u) {
+            uint8_t prep_ok = 0u;
+
+            if(s_cwjap_light_join != 0u && s_cwjap_light_need_prep == 0u) {
+                prep_ok = 1u;
+            } else if(s_cwjap_light_need_prep != 0u) {
+                prep_ok = cwjap_scr11_min_prep();
+                if(prep_ok != 0u) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP min prep ok\r\n");
+                }
+            } else if(s_cwjap_esp_idle_ok != 0u) {
+                prep_ok = cwjap_scr11_min_prep();
+                if(prep_ok != 0u) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP min prep ok\r\n");
+                } else {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP min prep fail\r\n");
+                }
+            } else {
             cloud_uart2_hw_drain_ms(150u);
             cloud_uart2_rx_clear();
-            (void)uart2_at_cmd_wait_ok("AT\r\n", 800u);
-            cloud_uart2_rx_clear();
-            /* ESP8266 CWJAP 要求 CIPMUX=0、CIPSERVER=0；MQTT 建链前再切回 CIPMUX=1 */
-            if(uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", ALIYUN_WAIT_MID_MS) &&
-               uart2_at_cmd_wait_ok("AT+CIPMUX=0\r\n", ALIYUN_WAIT_SHORT_MS) &&
-               uart2_at_cmd_wait_ok("AT+CIPSERVER=0\r\n", ALIYUN_WAIT_SHORT_MS) &&
-               uart2_at_cmd_wait_ok("AT+CIPMODE=0\r\n", ALIYUN_WAIT_SHORT_MS)) {
+            if(s_user_wifi_join_st == 1u && g_app_scr == APP_SCR_11) {
+                prep_ok = cwjap_scr11_radio_prep();
+            } else if(uart2_at_cmd_wait_ok("AT\r\n", 800u) &&
+                      uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", ALIYUN_WAIT_MID_MS) &&
+                      uart2_at_cmd_wait_ok("AT+CIPMUX=0\r\n", ALIYUN_WAIT_SHORT_MS) &&
+                      uart2_at_cmd_wait_ok("AT+CIPSERVER=0\r\n", ALIYUN_WAIT_SHORT_MS) &&
+                      uart2_at_cmd_wait_ok("AT+CIPMODE=0\r\n", ALIYUN_WAIT_SHORT_MS)) {
+                prep_ok = 1u;
+            }
+            }
+            if(prep_ok != 0u) {
                 s_sta_radio_prep_done = 1u;
                 s_modem_at_ok = 1u;
+                s_cwjap_quiet_until_ms = HAL_GetTick() + CWJAP_PREP_HOLD_MS;
+                break;
             } else {
                 printf("[ALIYUN] STA radio prep fail\r\n");
                 uart2_log_rx_snapshot("STA prep fail");
                 if(s_user_wifi_join_st == 1u) {
                     s_user_wifi_join_st = 3u;
                 }
+                s_cwjap_esp_idle_ok = 0u;
                 s_step = ALIYUN_STEP_WIFI_IDLE;
                 break;
             }
         }
-        cloud_uart2_rx_clear();
-        (void)uart2_send_text("AT+CWQAP\r\n");
-        (void)uart2_wait_text("OK", 600u);
-        cloud_uart2_hw_drain_ms(80u);
-        cloud_uart2_rx_clear();
+        if(s_cwjap_quiet_until_ms != 0u && HAL_GetTick() < s_cwjap_quiet_until_ms) {
+            break;
+        }
+        if(s_cwjap_resend_only == 0u && cloud_aliyun_at_wifi_joined() != 0u) {
+            cloud_uart2_rx_clear();
+            (void)uart2_send_text("AT+CWQAP\r\n");
+            (void)uart2_wait_text("OK", 2000u);
+            cloud_uart2_hw_drain_ms(200u);
+            s_cwjap_quiet_until_ms = HAL_GetTick() + CWJAP_CWQAP_HOLD_MS;
+            break;
+        }
+        if(s_cwjap_light_join != 0u && s_cwjap_light_need_prep == 0u && s_cwjap_resend_only == 0u) {
+            CWJAP_TRACE_MSG("[WiFi] CWJAP light before send\r\n");
+            cloud_uart2_wait_quiet_after_scan_abort(CWJAP_LIGHT_BEFORE_SEND_MS);
+        } else {
+            CWJAP_TRACE_MSG("[WiFi] CWJAP modem idle probe\r\n");
+            if(cloud_uart2_wait_modem_idle_ex(10000u, 2u) == 0u) {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP not idle before send\r\n");
+                if(s_user_wifi_join_st == 1u) {
+                    s_user_wifi_join_st = 3u;
+                }
+                s_cwjap_esp_idle_ok = 0u;
+                s_cwjap_light_join = 0u;
+                s_step = ALIYUN_STEP_WIFI_IDLE;
+                break;
+            }
+            cloud_uart2_hw_drain_ms(600u);
+        }
+        s_cwjap_esp_idle_ok = 0u;
 
         cwjap_build_cmd(cmd, sizeof(cmd));
         CWJAP_TRACE_MSG((s_cwjap_busy_retry != 0u) ?
                         "[WiFi] CWJAP send retry\r\n" :
                         "[WiFi] CWJAP send\r\n");
-        cloud_uart2_rx_clear();
-        if(uart2_send_text(cmd) && uart2_wait_wifi_sta_connected(CWJAP_CONNECT_WAIT_MS) > 0) {
+        if(cwjap_send_cmd_wait(cmd, CWJAP_CONNECT_WAIT_MS) > 0) {
             const char *joined_ssid = app_wifi_cfg_get_ssid();
             if(strstr(s_rx_win, "WIFI GOT IP") == NULL) {
                 (void)uart2_wait_text("WIFI GOT IP", CWJAP_GOT_IP_WAIT_MS);
             }
             if(strstr(s_rx_win, "WIFI GOT IP") == NULL) {
                 printf("[ALIYUN] CWJAP no GOT IP after connect rx=%s\r\n", s_rx_win);
+                CWJAP_TRACE_MSG("[WiFi] CWJAP no GOT IP\r\n");
                 if(s_user_wifi_join_st == 1u) {
                     s_user_wifi_join_st = 3u;
                 }
@@ -3343,34 +4685,88 @@ void cloud_aliyun_at_poll_5ms(void)
                 app_wifi_cfg_clear_reconnect_request();
                 break;
             }
+            CWJAP_TRACE_MSG("[WiFi] CWJAP GOT IP\r\n");
             if(joined_ssid != NULL && joined_ssid[0] != '\0') {
                 strncpy(s_connected_sta_ssid, joined_ssid, sizeof(s_connected_sta_ssid) - 1u);
                 s_connected_sta_ssid[sizeof(s_connected_sta_ssid) - 1u] = '\0';
             }
             printf("[ALIYUN] WIFI connected SSID=%s\r\n", joined_ssid);
+            CWJAP_TRACE_MSG("[WiFi] CWJAP join ok\r\n");
             CLOUD_DBG("WIFI connected SSID=%s", joined_ssid);
+            app_link_guard_wifi_end(1u);
+            /* GOT IP 即可更新 scr11「已连接」栏；CIFSR 仅作校验 */
+            s_wifi_sta_ip_ok = 1u;
+            s_wifi_ever_up = 1u;
+            if(s_user_wifi_join_st == 1u) {
+                s_wifi_join_fail_latch = 0u;
+                s_user_wifi_join_st = 2u;
+                cloud_uart2_set_ui_busy(0u);
+            }
             s_cifsr_retry_cnt = 0u;
             s_cifsr_last_try_ms = 0u;
             s_cwjap_busy_retry = 0u;
-            s_step = ALIYUN_STEP_CIFSR;
-            s_step_ms = HAL_GetTick();
+            s_cwjap_esp_idle_ok = 0u;
+            s_cwjap_light_join = 0u;
+            s_cwjap_light_need_prep = 0u;
+            cloud_aliyun_at_mqtt_kick_after_wifi();
             /* 本次连接请求已消费 */
             app_wifi_cfg_clear_reconnect_request();
         } else {
-            if(strstr(s_rx_win, "busy p") != NULL && s_cwjap_busy_retry == 0u) {
-                s_cwjap_busy_retry = 1u;
-                s_cwjap_uart_settle_done = 0u;
-                s_sta_radio_prep_done = 0u;
-                CWJAP_TRACE_MSG("[WiFi] CWJAP retry (busy p)\r\n");
-                printf("[ALIYUN] CWJAP busy p -> abort scan and retry once\r\n");
-                cloud_aliyun_cwlap_scan_abort();
-                (void)app_wifi_scan_abort_and_wait_idle(3000u);
-                cloud_uart2_wait_quiet_after_scan_abort(2000u);
-                /* 再探活一次，确保模组退出 busy 状态 */
-                cloud_uart2_hw_drain_ms(120u);
-                cloud_uart2_rx_clear();
-                (void)uart2_at_cmd_wait_ok("AT\r\n", 1200u);
-                cloud_uart2_rx_clear();
+            if((strstr(s_rx_win, "busy p") != NULL ||
+                (strstr(s_rx_win, "WIFI DISCONNECT") != NULL &&
+                 strstr(s_rx_win, "WIFI GOT IP") == NULL)) &&
+               s_user_wifi_join_st != 1u &&
+               s_cwjap_busy_retry < 2u) {
+                uint8_t idle_ok;
+
+                s_cwjap_busy_retry++;
+                if(strstr(s_rx_win, "busy p") != NULL) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP retry (busy p)\r\n");
+                } else {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP retry (disconnect)\r\n");
+                }
+                cloud_uart2_flush_rx();
+                cloud_uart2_wait_quiet_after_scan_abort(10000u);
+                if(s_cwjap_light_join != 0u && s_cwjap_light_need_prep == 0u &&
+                   strstr(s_rx_win, "busy p") != NULL) {
+                    s_cwjap_light_need_prep = 1u;
+                    s_sta_radio_prep_done = 0u;
+                    s_cwjap_resend_only = 0u;
+                    s_cwjap_try_channel = 1u;
+                    s_cwjap_quiet_until_ms = HAL_GetTick() + 800u;
+                    s_step = ALIYUN_STEP_CWJAP_SET;
+                    s_step_ms = HAL_GetTick();
+                    break;
+                }
+                idle_ok = cloud_uart2_wait_modem_idle_ex(12000u, 2u);
+                if(idle_ok == 0u && s_cwjap_busy_retry >= 2u) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP soft RST\r\n");
+                    cloud_uart2_rx_clear();
+                    (void)uart2_send_text("AT+RST\r\n");
+                    (void)cloud_uart2_wait_esp_ready(6000u);
+                    cloud_uart2_flush_rx();
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP RST wait done\r\n");
+                    idle_ok = cloud_uart2_wait_modem_idle(20000u);
+                }
+                if(idle_ok == 0u) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP post-RST idle fail\r\n");
+                    if(s_user_wifi_join_st == 1u) {
+                        s_user_wifi_join_st = 3u;
+                    }
+                    s_cwjap_busy_retry = 0u;
+                    s_cwjap_esp_idle_ok = 0u;
+                    s_step = ALIYUN_STEP_WIFI_IDLE;
+                    app_wifi_cfg_clear_reconnect_request();
+                    break;
+                }
+                if(s_cwjap_busy_retry >= 1u) {
+                    s_cwjap_try_channel = 1u;
+                }
+                s_cwjap_esp_idle_ok = 0u;
+                s_cwjap_resend_only = 1u;
+                s_cwjap_uart_settle_done = 1u;
+                s_sta_radio_prep_done = 1u;
+                s_cwjap_quiet_until_ms = HAL_GetTick() + 2000u;
                 s_step = ALIYUN_STEP_CWJAP_SET;
                 s_step_ms = HAL_GetTick();
                 break;
@@ -3383,13 +4779,7 @@ void cloud_aliyun_at_poll_5ms(void)
                    aliyun_step_name(s_step),
                    (unsigned)s_user_wifi_join_st,
                    (unsigned)s_uart_ui_busy);
-            if(s_user_wifi_join_st == 1u) {
-                s_user_wifi_join_st = 3u;
-            }
-            s_cwjap_busy_retry = 0u;
-            s_step = ALIYUN_STEP_WIFI_IDLE;
-            /* 失败后停止重试，允许恢复扫描/用户操作 */
-            app_wifi_cfg_clear_reconnect_request();
+            cloud_aliyun_at_wifi_join_fail_finalize();
         }
         break;
     case ALIYUN_STEP_CIFSR:
@@ -3404,24 +4794,11 @@ void cloud_aliyun_at_poll_5ms(void)
             s_wifi_sta_ip_ok = 1u;
             s_wifi_ever_up = 1u;
             if(s_user_wifi_join_st == 1u) {
+                s_wifi_join_fail_latch = 0u;
                 s_user_wifi_join_st = 2u;
                 cloud_uart2_set_ui_busy(0u);
             }
-            if(g_app_scr == APP_SCR_11) {
-                printf("[ALIYUN] STA got IP on scr11 -> pause MQTT until leave\r\n");
-                CLOUD_DBG("STA got IP scr11 pause MQTT");
-                s_scr11_mqtt_paused = 1u;
-                s_step = ALIYUN_STEP_WIFI_IDLE;
-                s_step_ms = HAL_GetTick();
-                break;
-            }
-            printf("[ALIYUN] STA got IP, next MQTT (wifi_ever_up=1)\r\n");
-            CLOUD_DBG("STA got IP, next MQTT");
-#if (APP_ALIYUN_SNTP_ENABLE == 1)
-            s_step = ALIYUN_STEP_SNTP_CFG;
-#else
-            s_step = ALIYUN_STEP_CIPSTART;
-#endif
+            cloud_aliyun_at_mqtt_kick_after_wifi();
         } else {
             s_wifi_sta_ip_ok = 0u;
             s_cifsr_retry_cnt++;
@@ -3442,7 +4819,10 @@ void cloud_aliyun_at_poll_5ms(void)
         break;
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
     case ALIYUN_STEP_SNTP_CFG:
-        snprintf(cmd, sizeof(cmd), "AT+CIPSNTPCFG=1,%d,\"ntp.aliyun.com\",\"cn.pool.ntp.org\"\r\n",
+        if(aliyun_ensure_sta_ip() == 0u) {
+            break;
+        }
+        snprintf(cmd, sizeof(cmd), "AT+CIPSNTPCFG=1,%d,\"ntp1.aliyun.com\",\"cn.ntp.org.cn\"\r\n",
                  APP_ALIYUN_SNTP_TZ_HOURS);
         if(uart2_send_text(cmd) && uart2_wait_text("OK", ALIYUN_SNTP_CMD_OK_MS)) {
             s_sntp_wait_until_ms = HAL_GetTick() + ALIYUN_SNTP_POSTCFG_DELAY_MS;
@@ -3451,66 +4831,129 @@ void cloud_aliyun_at_poll_5ms(void)
             s_sntp_next_query_ms = s_sntp_wait_until_ms;
             s_sntp_deadline_ms = s_sntp_wait_until_ms + 15000u;
             s_step = ALIYUN_STEP_SNTP_WAIT;
+            TIME_TRACE_MSG("[TIME]Ecf\r\n");
         } else {
-            printf("[ALIYUN] SNTP config fail, continue MQTT\r\n");
-            s_step = ALIYUN_STEP_CIPSTART;
+            TIME_TRACE_MSG("[TIME]EcX\r\n");
+            cloud_aliyun_at_mqtt_kick_after_wifi();
         }
         break;
     case ALIYUN_STEP_SNTP_WAIT:
-        if((int32_t)(HAL_GetTick() - s_sntp_wait_until_ms) >= 0) {
+        if((int32_t)(HAL_GetTick() - (int32_t)s_sntp_wait_until_ms) >= 0) {
             s_step = ALIYUN_STEP_SNTP_TIME;
         }
         break;
     case ALIYUN_STEP_SNTP_TIME:
-        if((int32_t)(HAL_GetTick() - s_sntp_next_query_ms) >= 0) {
+        if((int32_t)(HAL_GetTick() - (int32_t)s_sntp_next_query_ms) >= 0) {
             s_sntp_next_query_ms = HAL_GetTick() + 1000u;
             if(aliyun_try_fetch_sntp_once()) {
-                s_step = ALIYUN_STEP_CIPSTART;
+                cloud_aliyun_at_mqtt_kick_after_wifi();
             } else {
                 s_sntp_try_cnt++;
-                if(s_sntp_empty_cnt >= 3u && !s_http_date_tried) {
-                    printf("[ALIYUN] SNTP empty, skip HTTP-Date -> MQTT\r\n");
-                    s_http_date_tried = 1u;
-                    s_step = ALIYUN_STEP_CIPSTART;
+                if(s_sntp_try_cnt >= ALIYUN_SNTP_MAX_TRY) {
+                    TIME_TRACE_MSG("[TIME]Skm\r\n");
+                    cloud_aliyun_at_mqtt_kick_after_wifi();
                 }
             }
         }
-        if((int32_t)(HAL_GetTick() - s_sntp_deadline_ms) >= 0) {
-            printf("[ALIYUN] SNTP timeout, continue MQTT (tries=%u)\r\n", (unsigned)s_sntp_try_cnt);
-            s_http_date_tried = 1u;
-            s_step = ALIYUN_STEP_CIPSTART;
+        if((int32_t)(HAL_GetTick() - (int32_t)s_sntp_deadline_ms) >= 0) {
+            TIME_TRACE_MSG("[TIME]Eto\r\n");
+            cloud_aliyun_at_mqtt_kick_after_wifi();
         }
         break;
 #endif
     case ALIYUN_STEP_CIPSTART:
         if(app_wifi_policy_may_run_mqtt() == 0u) {
             s_step = ALIYUN_STEP_WIFI_IDLE;
+            CLOUD_TRACE_MSG("[CLOUD] MQTT blocked no ip\r\n");
             break;
         }
-        if(aliyun_ensure_sta_ip() == 0u) {
+        if(s_cipstart_next_ms != 0u && HAL_GetTick() < s_cipstart_next_ms) {
+            break;
+        }
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+        if(s_mqtt_fast_join != 0u) {
+            CLOUD_TRACE_MSG("[CLOUD] CIPSTART fast\r\n");
+        } else
+#endif
+        {
+            CLOUD_TRACE_MSG("[CLOUD] CIPSTART run\r\n");
+        }
+        if(s_wifi_sta_ip_ok == 0u && aliyun_ensure_sta_ip() == 0u) {
             printf("[ALIYUN] CIPSTART blocked: no STA IP\r\n");
+            CLOUD_TRACE_MSG("[CLOUD] MQTT TCP fail (no STA IP)\r\n");
             s_step = ALIYUN_STEP_CWJAP_SET;
             s_sta_radio_prep_done = 0u;
             break;
         }
-        if(!(uart2_send_text("AT+CIPMUX=1\r\n") && uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS))) {
-            printf("[ALIYUN] CIPMUX=1 for MQTT fail\r\n");
-            break;
+        cloud_uart2_rx_clear();
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+        if(s_mqtt_fast_join != 0u && s_wifi_sta_ip_ok != 0u) {
+            aliyun_mqtt_close_link0();
+            if(s_cipmux1_ok == 0u) {
+                if(!(uart2_send_text("AT+CIPMUX=1\r\n") && uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS))) {
+                    printf("[ALIYUN] CIPMUX=1 fast fail\r\n");
+                    CLOUD_TRACE_MSG("[CLOUD] MQTT TCP fail (CIPMUX)\r\n");
+                    s_cipstart_next_ms = HAL_GetTick() + ALIYUN_CIPSTART_RETRY_MS;
+                    break;
+                }
+                s_cipmux1_ok = 1u;
+            }
+        } else
+#endif
+        {
+            (void)uart2_send_text("AT+CIPCLOSE=0\r\n");
+            (void)uart2_wait_text("OK", 200u);
+            (void)uart2_send_text("AT+CIPCLOSE=1\r\n");
+            (void)uart2_wait_text("OK", 200u);
+            cloud_uart2_drain_until_idle(ALIYUN_MQTT_DRAIN_MAX_MS, ALIYUN_MQTT_DRAIN_QUIET_MS);
+            if(!(uart2_send_text("AT+CIPMUX=1\r\n") && uart2_wait_text("OK", ALIYUN_WAIT_MID_MS))) {
+                printf("[ALIYUN] CIPMUX=1 for MQTT fail\r\n");
+                CLOUD_TRACE_MSG("[CLOUD] MQTT TCP fail (CIPMUX)\r\n");
+                s_cipstart_next_ms = HAL_GetTick() + ALIYUN_CIPSTART_RETRY_MS;
+                break;
+            }
+            s_cipmux1_ok = 1u;
+            cloud_uart2_drain_until_idle(60u, ALIYUN_MQTT_DRAIN_QUIET_MS);
         }
         snprintf(cmd, sizeof(cmd), "AT+CIPSTART=0,\"TCP\",\"%s\",1883\r\n", s_host);
-        if(uart2_send_text(cmd) && (uart2_wait_text("CONNECT", ALIYUN_WAIT_LONG_MS) || uart2_wait_text("ALREADY CONNECTED", ALIYUN_WAIT_SHORT_MS))) {
+        if(uart2_send_text(cmd) &&
+           (uart2_wait_text("CONNECT", ALIYUN_CIPSTART_WAIT_MS) ||
+            uart2_wait_text("ALREADY CONNECTED", ALIYUN_WAIT_MID_MS))) {
+            s_cipsend_retry_cnt = 0u;
+            aliyun_mqtt_uart_prep();
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+            s_cipstart_next_ms = HAL_GetTick() +
+                ((s_mqtt_fast_join != 0u) ? ALIYUN_POST_TCP_MQTT_FAST_MS : ALIYUN_POST_TCP_MQTT_MS);
+#else
+            s_cipstart_next_ms = HAL_GetTick() + ALIYUN_POST_TCP_MQTT_MS;
+#endif
             s_step = ALIYUN_STEP_CIPSEND;
             printf("[ALIYUN] TCP connected\r\n");
+            CLOUD_TRACE_MSG("[CLOUD] MQTT TCP ok\r\n");
             CLOUD_DBG("TCP connected");
         } else {
             printf("[ALIYUN] CIPSTART fail\r\n");
+            if(aliyun_rx_has_no_ip() != 0u) {
+                CLOUD_TRACE_MSG("[CLOUD] MQTT TCP fail (no ip)\r\n");
+            } else if(strstr(s_rx_win, "DNS") != NULL) {
+                CLOUD_TRACE_MSG("[CLOUD] MQTT TCP fail (DNS)\r\n");
+            } else {
+                CLOUD_TRACE_MSG("[CLOUD] MQTT TCP fail\r\n");
+            }
             uart2_log_rx_snapshot("CIPSTART fail");
+            s_cipstart_next_ms = HAL_GetTick() + ALIYUN_CIPSTART_RETRY_MS;
             if(aliyun_rx_has_no_ip() != 0u) {
                 printf("[ALIYUN] CIPSTART no ip -> recover WiFi\r\n");
                 s_wifi_sta_ip_ok = 0u;
+                s_mqtt_fast_join = 0u;
                 s_step = ALIYUN_STEP_CWJAP_SET;
                 s_sta_radio_prep_done = 0u;
             } else {
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+                if(s_wifi_sta_ip_ok != 0u) {
+                    s_mqtt_fast_join = 1u;
+                }
+#endif
                 s_step = ALIYUN_STEP_CIPSTART;
             }
         }
@@ -3520,65 +4963,124 @@ void cloud_aliyun_at_poll_5ms(void)
             printf("[ALIYUN] MQTT password empty or pkt invalid\r\n");
             return;
         }
+        if(s_cipstart_next_ms != 0u && HAL_GetTick() < s_cipstart_next_ms) {
+            break;
+        }
+        s_cipstart_next_ms = 0u;
+        aliyun_mqtt_uart_prep();
         snprintf(cmd, sizeof(cmd), "AT+CIPSEND=0,%u\r\n", (unsigned)s_mqtt_connect_pkt_len);
-        if(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_WAIT_SHORT_MS)) {
-            s_step = ALIYUN_STEP_SEND_CONNECT;
+        if(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_CIPSEND_PROMPT_MS)) {
+            s_cipsend_retry_cnt = 0u;
+            CLOUD_TRACE_MSG("[CLOUD] MQTT CIPSEND ok\r\n");
+            if(uart2_send_bytes(s_mqtt_connect_pkt, s_mqtt_connect_pkt_len) &&
+               uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS)) {
+                CLOUD_TRACE_MSG("[CLOUD] MQTT CONNECT sent\r\n");
+                s_step = ALIYUN_STEP_WAIT_CONNACK;
+            } else {
+                printf("[ALIYUN] send mqtt connect fail\r\n");
+                CLOUD_TRACE_MSG("[CLOUD] MQTT send fail\r\n");
+                aliyun_mqtt_close_link0();
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+                if(s_wifi_sta_ip_ok != 0u) {
+                    s_mqtt_fast_join = 1u;
+                }
+#endif
+                s_cipstart_next_ms = HAL_GetTick() + ALIYUN_MQTT_RECONNECT_MS;
+                s_step = ALIYUN_STEP_CIPSTART;
+            }
         } else {
             printf("[ALIYUN] CIPSEND prompt fail\r\n");
+            s_cipsend_retry_cnt++;
+            if(s_cipsend_retry_cnt < ALIYUN_CIPSEND_RETRY_MAX) {
+                CLOUD_TRACE_MSG("[CLOUD] MQTT CIPSEND retry\r\n");
+                aliyun_mqtt_uart_prep();
+                s_cipstart_next_ms = HAL_GetTick() + ALIYUN_CIPSEND_RETRY_MS;
+                break;
+            }
+            s_cipsend_retry_cnt = 0u;
+            CLOUD_TRACE_MSG("[CLOUD] MQTT CIPSEND fail\r\n");
+            aliyun_mqtt_close_link0();
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+            if(s_wifi_sta_ip_ok != 0u) {
+                s_mqtt_fast_join = 1u;
+            }
+#endif
+            s_cipstart_next_ms = HAL_GetTick() + ALIYUN_MQTT_RECONNECT_MS;
+            s_step = ALIYUN_STEP_CIPSTART;
         }
         break;
     case ALIYUN_STEP_SEND_CONNECT:
-        if(uart2_send_bytes(s_mqtt_connect_pkt, s_mqtt_connect_pkt_len)) {
-            s_step = ALIYUN_STEP_WAIT_CONNACK;
-        } else {
-            printf("[ALIYUN] send mqtt connect fail\r\n");
-        }
+        /* 兼容旧状态：与 CIPSEND 合并为一步，此处仅转发 */
+        s_step = ALIYUN_STEP_CIPSEND;
         break;
     case ALIYUN_STEP_WAIT_CONNACK:
-        {
-            uint8_t ack[24];
-            uint16_t ack_len = 0u;
-            uint16_t i;
-            uint8_t ok = 0u;
-            if(uart2_recv_ipd_payload(ack, sizeof(ack), &ack_len, ALIYUN_WAIT_LONG_MS)) {
-                for(i = 0u; (uint16_t)(i + 3u) < ack_len; i++) {
-                    if(ack[i] == 0x20u && ack[i + 1u] == 0x02u && ack[i + 2u] == 0x00u && ack[i + 3u] == 0x00u) {
-                        ok = 1u;
-                        break;
-                    }
-                }
+        if(aliyun_wait_mqtt_connack(ALIYUN_CONNACK_WAIT_MS) != 0u) {
+            s_step = ALIYUN_STEP_ONLINE;
+            s_mqtt_fast_join = 0u;
+            s_ping_fail_streak = 0u;
+            s_last_ping_ms = HAL_GetTick();
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+            s_sntp_cfg_sent = 0u;
+            s_sntp_online_query_ms = 0u;
+#endif
+            printf("[ALIYUN] MQTT connected (CONNACK OK) -> cloud online\r\n");
+            CLOUD_TRACE_MSG("[CLOUD] MQTT online ok\r\n");
+            s_ntp_connect_tried = 1u;
+            s_ntp_sub_sess = 0u;
+            s_ntp_sync_running = 0u;
+            s_ntp_next_request_ms = 0u;
+            if(s_sntp_synced != 0u || app_wall_clock_valid() != 0u) {
+                s_ntp_synced = 1u;
             }
-            if(ok) {
-                s_step = ALIYUN_STEP_ONLINE;
-                s_last_ping_ms = HAL_GetTick();
-                printf("[ALIYUN] MQTT connected (CONNACK OK) -> cloud online\r\n");
-                CLOUD_DBG("MQTT connected -> cloud online");
-            } else {
-                s_step = ALIYUN_STEP_CIPSTART;
-                printf("[ALIYUN] CONNACK invalid\r\n");
-                CLOUD_DBG("CONNACK invalid");
-                s_cloud_scan_kick_done = 0u;
+            cloud_ota_service_flush_unlock_pending();
+            app_link_guard_mqtt_end(1u);
+            CLOUD_DBG("MQTT connected -> cloud online");
+        } else {
+            printf("[ALIYUN] CONNACK invalid\r\n");
+            CLOUD_TRACE_MSG("[CLOUD] MQTT CONNACK fail\r\n");
+            CLOUD_DBG("CONNACK invalid");
+            s_cloud_scan_kick_done = 0u;
+            aliyun_mqtt_close_link0();
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+            if(s_wifi_sta_ip_ok != 0u) {
+                s_mqtt_fast_join = 1u;
             }
+#endif
+            s_cipstart_next_ms = HAL_GetTick() + ALIYUN_MQTT_RECONNECT_MS;
+            s_step = ALIYUN_STEP_CIPSTART;
         }
         break;
     case ALIYUN_STEP_ONLINE:
-        aliyun_ntp_try_sync_online();
-        if(app_cloud_session_busy() != 0u) {
-            break;
+        /* MQTT 在线时勿发 AT+CIPSNTPCFG/CIPSNTPTIME?，会打断 TCP；仅用 MQTT-NTP */
+        if(s_ntp_synced == 0u) {
+            aliyun_ntp_try_sync_online();
         }
+        cloud_ota_service_flush_unlock_pending();
         if((HAL_GetTick() - s_last_ping_ms) >= ALIYUN_KEEPALIVE_PING_MS) {
             s_last_ping_ms = HAL_GetTick();
             if(!aliyun_send_ping_and_check()) {
+                s_ping_fail_streak++;
+                if(s_ping_fail_streak < 2u) {
+                    break;
+                }
+                s_ping_fail_streak = 0u;
                 printf("[ALIYUN] ping timeout/reconnect MQTT\r\n");
                 CLOUD_DBG("ping timeout/reconnect MQTT");
                 s_cloud_scan_kick_done = 0u;
-                uart2_send_text("AT+CIPCLOSE=0\r\n");
-                uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS);
+                aliyun_mqtt_close_link0();
                 if(app_wifi_policy_may_run_mqtt() != 0u) {
+#if (APP_CLOUD_FAST_AFTER_WIFI_JOIN != 0)
+                    if(s_wifi_sta_ip_ok != 0u) {
+                        s_mqtt_fast_join = 1u;
+                    }
+#endif
+                    s_cipstart_next_ms = HAL_GetTick() + ALIYUN_MQTT_RECONNECT_MS;
                     s_step = ALIYUN_STEP_CIPSTART;
                 } else {
                     s_step = ALIYUN_STEP_WIFI_IDLE;
                 }
+            } else {
+                s_ping_fail_streak = 0u;
             }
         }
         break;

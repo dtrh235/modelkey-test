@@ -78,9 +78,9 @@ void setup_scr_screen_11(lv_ui *ui)
     lv_obj_add_flag(ui->screen_11_row_connected, LV_OBJ_FLAG_HIDDEN);
 
     ui->screen_11_label_scan = lv_label_create(ui->screen_11_cont_1);
-    lv_label_set_text(ui->screen_11_label_scan, "\xe6\x89\xab\xe6\x8f\x8f\xe4\xb8\xad");
+    lv_label_set_text(ui->screen_11_label_scan, "\xe8\xaf\xb7\xe6\x8c\x89\xe6\x89\xab\xe6\x8f\x8f\xe5\x88\xb7\xe6\x96\xb0");
     lv_obj_set_pos(ui->screen_11_label_scan, 6, 78);
-    lv_obj_set_size(ui->screen_11_label_scan, 100, 30);
+    lv_obj_set_size(ui->screen_11_label_scan, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_style_text_font(ui->screen_11_label_scan, &lv_font_SourceHanSerifSC_Regular_25, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(ui->screen_11_label_scan, lv_color_hex(0x006bb3), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_align(ui->screen_11_label_scan, LV_TEXT_ALIGN_LEFT, LV_PART_MAIN | LV_STATE_DEFAULT);

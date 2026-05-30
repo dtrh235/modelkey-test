@@ -99,3 +99,14 @@ void app_remember_diag_log(const char *fmt, ...)
     usart_debug_tx_str(buf);
 #endif
 }
+
+void time_trace_tx(const char *s)
+{
+#if (APP_TIME_TRACE != 0)
+    if(s != NULL) {
+        usart_debug_tx_str(s);
+    }
+#else
+    (void)s;
+#endif
+}

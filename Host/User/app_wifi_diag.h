@@ -22,4 +22,12 @@ void app_remember_diag_log(const char *fmt, ...);
 #define REMEMBER_DBG(...) ((void)0)
 #endif
 
+#if (APP_TIME_TRACE != 0)
+void time_trace_tx(const char *s);
+#define TIME_TRACE_MSG(s)   time_trace_tx(s)
+#else
+#define TIME_TRACE_MSG(s)   ((void)0)
+#endif
+#define CLOUD_TRACE_MSG(s)  ((void)0)
+
 #endif

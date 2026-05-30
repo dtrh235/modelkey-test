@@ -17,8 +17,13 @@
 #include "app_wifi_cfg.h"
 #include "app_wifi_remember.h"
 #include "app_wifi_scan.h"
+#include "app_link_guard.h"
 #include "app_touch_ui.h"
 #include "app_config.h"
+#if (APP_WIFI_UART_DEBUG == 0)
+#undef printf
+#define printf(...) ((void)0)
+#endif
 
 /* 滑动列表时降低 merge 频率，避免与 CWLAP 刷新抢 GuiTask */
 #define WIFI_LIST_MERGE_SCROLL_MS  400u
@@ -28,6 +33,7 @@
 #define WIFI_REFRESH_BTN_H          30
 
 LV_FONT_DECLARE(lv_font_cn_wifi_16);
+LV_FONT_DECLARE(lv_font_cn_wifi_25);
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_21);
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_25);
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_20);
@@ -133,6 +139,7 @@ static void screen_wifi_refresh_btn_raise(void);
 static void screen_wifi_rebuild_list_from_scan(const char *conn_ssid);
 static void screen_wifi_list_panel_setup(void);
 static uint8_t screen_wifi_scan_in_progress(void);
+static void screen_wifi_update_scan_hint(void);
 
 static void screen_wifi_update_cursor_pos(void)
 {
@@ -532,6 +539,21 @@ static void screen_wifi_style_row(uint8_t idx, uint8_t selected)
     }
 }
 
+static void screen_wifi_show_enter_idle_hint(void)
+{
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_obj_clear_flag(guider_ui.screen_11_label_scan, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan, &lv_font_SourceHanSerifSC_Regular_25,
+                                   LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe8\xaf\xb7\xe6\x8c\x89\xe6\x89\xab\xe6\x8f\x8f\xe5\x88\xb7\xe6\x96\xb0");
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
+        lv_label_set_text(guider_ui.screen_11_label_scan_dots, "");
+        lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_scan_dots_anim_on = 0u;
+}
+
 static void screen_wifi_update_connected_bar(void)
 {
     char ssid_buf[33];
@@ -549,7 +571,12 @@ static void screen_wifi_update_connected_bar(void)
     /* 禁止在 GuiTask 里发 AT+CWJAP?：会与 CloudTask 抢 UART2 导致整屏卡死 */
     (void)cloud_aliyun_at_get_connected_ssid(ssid_buf, sizeof(ssid_buf));
     if(ssid_buf[0] == '\0') {
-        lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, "-");
+        const char *cfg_ssid = app_wifi_cfg_get_ssid();
+        if(cfg_ssid != NULL && cfg_ssid[0] != '\0') {
+            lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, cfg_ssid);
+        } else {
+            lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, "-");
+        }
     } else {
         lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, ssid_buf);
     }
@@ -906,6 +933,14 @@ static void screen_wifi_merge_list(void)
     screen_wifi_hide_empty_hint();
     scan_done = screen_wifi_scan_pass_done();
 
+    if(app_wifi_scan_last_failed() != 0u) {
+        screen_wifi_clear_rows();
+        screen_wifi_hide_empty_hint();
+        screen_wifi_update_scan_hint();
+        screen_wifi_refresh_btn_raise();
+        return;
+    }
+
     conn_ssid[0] = '\0';
     if(cloud_aliyun_at_wifi_link_ready() != 0u) {
         (void)cloud_aliyun_at_get_connected_ssid(conn_ssid, sizeof(conn_ssid));
@@ -1141,6 +1176,19 @@ static void screen_wifi_update_scan_hint(void)
         if(!s_scan_dots_anim_on) {
             screen_wifi_scan_dots_anim_reset();
         }
+    } else if(app_wifi_scan_last_failed() != 0u) {
+        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan, &lv_font_cn_wifi_25,
+                                   LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe6\x89\xab\xe6\x8f\x8f\xe5\xa4\xb1\xe8\xb4\xa5");
+        if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
+            lv_label_set_text(guider_ui.screen_11_label_scan_dots, "");
+            lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(guider_ui.screen_11_label_scan_dots);
+        }
+        screen_wifi_hide_empty_hint();
+        lv_obj_move_foreground(guider_ui.screen_11_label_scan);
+        s_scan_dots_anim_on = 0u;
+        screen_wifi_refresh_btn_raise();
     } else {
         if(lv_font_get_glyph_dsc(&lv_font_SourceHanSerifSC_Regular_25, &gd, 0x626Bu, 0u) &&
            lv_font_get_glyph_dsc(&lv_font_SourceHanSerifSC_Regular_25, &gd, 0x63CFu, 0u) &&
@@ -1155,6 +1203,7 @@ static void screen_wifi_update_scan_hint(void)
                                            "\xe6\x89\xab\xe6\x8f\x8fOK");
         if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
             lv_label_set_text(guider_ui.screen_11_label_scan_dots, "");
+            lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(guider_ui.screen_11_label_scan_dots);
         }
         lv_obj_move_foreground(guider_ui.screen_11_label_scan);
@@ -1244,15 +1293,27 @@ void screen_wifi_refresh_once(void)
     if(g_app_scr != APP_SCR_11 || screen_wifi_popup_is_active()) {
         return;
     }
+    app_wifi_connect_gui_recover();
     if(app_wifi_connect_busy() != 0u) {
-        printf("[WiFi] refresh ignored: connect busy\r\n");
+        if(cloud_aliyun_at_user_wifi_join_active() != 0u ||
+           cloud_aliyun_at_wifi_bringup_active() != 0u) {
+            printf("[WiFi] refresh ignored: connect busy\r\n");
+            return;
+        }
+        app_wifi_connect_reset();
+    }
+    if(app_link_guard_blocks_scan() != 0u) {
+        printf("[WiFi] refresh ignored: link guard\r\n");
         return;
     }
+    app_wifi_scan_release_connect_hold();
+    g_wifi_scan_abort = 0u;
     app_wifi_scan_request_now();
     printf("[WiFi] refresh tap\r\n");
     screen_wifi_show_scanning();
     screen_wifi_scan_dots_anim_reset();
     screen_wifi_hide_empty_hint();
+    screen_wifi_gui_wake();
 #endif
 }
 
@@ -1327,11 +1388,42 @@ void screen_wifi_prepare_on_enter(void)
     app_wifi_remember_scr11_reset();
     /* 不自动扫描；列表/状态仅响应用户点「扫描」或连接结果 */
 #endif
+    screen_wifi_show_enter_idle_hint();
+    screen_wifi_update_connected_bar();
+    screen_wifi_refresh_btn_raise();
 }
 
 void screen_wifi_gui_wake(void)
 {
     s_gui_wake = 1u;
+}
+
+void screen_wifi_notify_sta_up(void)
+{
+    screen_wifi_update_connected_bar();
+    screen_wifi_gui_wake();
+}
+
+void screen_wifi_notify_connect_fail(void)
+{
+    s_scan_dots_anim_on = 0u;
+    s_connecting_row = 0xFFu;
+    if(g_app_scr != APP_SCR_11) {
+        return;
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_obj_clear_flag(guider_ui.screen_11_label_scan, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan, &lv_font_SourceHanSerifSC_Regular_25,
+                                   LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe8\xbf\x9e\xe6\x8e\xa5\xe5\xa4\xb1\xe8\xb4\xa5");
+        lv_obj_move_foreground(guider_ui.screen_11_label_scan);
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
+        lv_label_set_text(guider_ui.screen_11_label_scan_dots, "");
+        lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
+    }
+    screen_wifi_refresh_btn_raise();
+    screen_wifi_gui_wake();
 }
 
 uint8_t screen_wifi_gui_work_pending(void)
@@ -1349,7 +1441,7 @@ uint8_t screen_wifi_gui_work_pending(void)
         return 1u;
     }
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
-    if(app_wifi_scan_busy() != 0u) {
+    if(app_wifi_scan_busy() != 0u || app_wifi_scan_has_pending() != 0u) {
         return 1u;
     }
     if(app_wifi_connect_busy() != 0u) {
@@ -1372,16 +1464,20 @@ void screen_wifi_poll_tick(void)
     }
 
     app_wifi_scan_gui_tick();
+    app_wifi_connect_gui_recover();
 
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
     busy = app_wifi_scan_busy();
 
-    if(!screen_wifi_popup_is_active() && busy != 0u) {
-        if(!s_scan_dots_anim_on) {
-            screen_wifi_show_scanning();
-            screen_wifi_scan_dots_anim_reset();
-        } else {
-            screen_wifi_scan_dots_anim_tick();
+    if(!screen_wifi_popup_is_active()) {
+        uint8_t scan_ui = (uint8_t)(busy != 0u || app_wifi_scan_has_pending() != 0u || s_scan_dots_anim_on != 0u);
+        if(scan_ui != 0u) {
+            if(!s_scan_dots_anim_on) {
+                screen_wifi_show_scanning();
+                screen_wifi_scan_dots_anim_reset();
+            } else {
+                screen_wifi_scan_dots_anim_tick();
+            }
         }
     }
 

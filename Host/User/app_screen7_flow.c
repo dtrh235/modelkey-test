@@ -2,6 +2,7 @@
 
 #include "gui_guider.h"
 #include "app_screen.h"
+#include "app_screen5_flow.h"
 #include "ui_common_utils.h"
 #include "ui_auth_input.h"
 #include "ui_menu_popup_utils.h"
@@ -17,8 +18,48 @@ extern lv_obj_t *g_screen7_popup;
 extern lv_obj_t *g_screen7_popup_btn_yes;
 extern lv_obj_t *g_screen7_popup_btn_no;
 
+static lv_timer_t *s_screen7_result_timer = NULL;
+static uint8_t s_screen7_admin_deleted = 0u;
+
+static void screen7_result_dismiss(void)
+{
+    uint8_t go_acc_mgr = s_screen7_admin_deleted;
+
+    if(s_screen7_result_timer != NULL) {
+        lv_timer_del(s_screen7_result_timer);
+        s_screen7_result_timer = NULL;
+    }
+    screen7_hide_all_msgbox();
+    s_screen7_admin_deleted = 0u;
+    if(go_acc_mgr != 0u) {
+        enter_screen_5();
+    }
+}
+
+static void screen7_result_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    screen7_result_dismiss();
+}
+
+static void screen7_result_timer_start(void)
+{
+    if(s_screen7_result_timer != NULL) {
+        lv_timer_del(s_screen7_result_timer);
+        s_screen7_result_timer = NULL;
+    }
+    s_screen7_result_timer = lv_timer_create(screen7_result_timer_cb, 3000, NULL);
+    if(s_screen7_result_timer != NULL) {
+        lv_timer_set_repeat_count(s_screen7_result_timer, 1);
+    }
+}
+
 void screen7_hide_all_msgbox(void)
 {
+    if(s_screen7_result_timer != NULL) {
+        lv_timer_del(s_screen7_result_timer);
+        s_screen7_result_timer = NULL;
+    }
     ui_common_hide_msgbox(&g_screen7_popup, &g_screen7_popup_btn_yes, &g_screen7_popup_btn_no, &g_screen7_msgbox_state);
 }
 
@@ -52,12 +93,24 @@ void screen7_show_msgbox1(void)
 
 void screen7_show_msgbox2(void)
 {
-    screen7_show_simple_popup("删除成功", 2u, 0u);
+    screen7_show_delete_result(1u, 0u);
 }
 
 void screen7_show_msgbox3(void)
 {
-    screen7_show_simple_popup("删除失败", 3u, 0u);
+    screen7_show_delete_result(0u, 0u);
+}
+
+void screen7_show_delete_result(uint8_t success, uint8_t was_admin)
+{
+    s_screen7_admin_deleted = was_admin;
+    screen7_show_simple_popup(success ? "删除成功" : "删除失败", success ? 2u : 3u, 0u);
+    screen7_result_timer_start();
+}
+
+void screen7_dismiss_result_popup(void)
+{
+    screen7_result_dismiss();
 }
 
 static void screen7_update_cursor_pos(void)

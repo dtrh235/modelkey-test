@@ -2,6 +2,8 @@
 #define CLOUD_ALIYUN_AT_H
 
 #include <stdint.h>
+#include "app_config.h"
+#include "app_config.h"
 
 void cloud_aliyun_at_init(void);
 void cloud_aliyun_at_poll_5ms(void);
@@ -20,8 +22,12 @@ void cloud_aliyun_at_request_target_wifi_join(void);
 /* 已连 STA 的 SSID（仅 wifi_joined 时有效） */
 uint8_t cloud_aliyun_at_get_connected_ssid(char *out, uint16_t out_sz);
 uint8_t cloud_aliyun_at_refresh_connected_ssid(void);
-/* 连接超时诊断：step/join/ui_busy/async */
+/* 连接超时诊断：step/join/ui_busy/async（仅 APP_WIFI_UART_DEBUG） */
+#if (APP_WIFI_UART_DEBUG != 0)
 void cloud_aliyun_at_wifi_join_diag_printf(void);
+#else
+#define cloud_aliyun_at_wifi_join_diag_printf() ((void)0)
+#endif
 uint8_t cloud_aliyun_at_publish_property(const char *json_payload);
 
 /* Shared UART2 (ESP WiFi) for WiFi settings UI scan/connect */
@@ -59,18 +65,25 @@ int cloud_aliyun_at_cwlap_scan_async_start(char *dst, uint16_t dst_sz, uint16_t 
 int cloud_aliyun_at_cwlap_scan_async_poll(void);
 void cloud_aliyun_at_cwlap_scan_async_abort(void);
 uint8_t cloud_aliyun_at_cwlap_scan_async_active(void);
+/* CloudTask：扫描 abort/结束后等 ESP AT 真 idle（持 uart2 mutex） */
+uint8_t cloud_aliyun_at_cwlap_teardown_idle(uint32_t timeout_ms);
 /* 已废弃：rev=23 起不再使用 async 分片扫描 */
 #define CWLAP_SCAN_RUNNING  1
+#define CWLAP_SCAN_DEFERRED 2  /* UART2 忙，未发 CWLAP */
 void cloud_aliyun_cwlap_scan_begin(void);
 void cloud_aliyun_cwlap_scan_abort(void);
 uint8_t cloud_aliyun_cwlap_scan_active(void);
 /* 1=进行中 0=成功 <0=失败 */
 int cloud_aliyun_cwlap_scan_step(char *dst, uint16_t dst_sz, uint16_t *out_len);
 /* 用户选热点后走原 CWJAP 流程（app_wifi_cfg 中的 SSID/密码） */
+void cloud_aliyun_at_user_wifi_join_set_esp_idle_ok(void);
 void cloud_aliyun_at_user_wifi_join_start(void);
 /* 0=进行中 1=成功 2=失败 */
 uint8_t cloud_aliyun_at_user_wifi_join_poll(void);
 void cloud_aliyun_at_user_wifi_join_abort(void);
+/* CWJAP 已失败：供 GuiTask 立即结束 connect_busy（勿等 CloudTask 轮询） */
+uint8_t cloud_aliyun_at_user_wifi_join_fail_pending(void);
+void cloud_aliyun_at_user_wifi_join_fail_clear(void);
 /* 1=用户手动/自动连 WiFi 占用 UART2（扫描应让路） */
 uint8_t cloud_aliyun_at_user_wifi_join_active(void);
 /* 0 idle 1 pending 2 ok 3 fail */
@@ -80,6 +93,7 @@ uint8_t cloud_aliyun_at_wifi_bringup_active(void);
 uint8_t cloud_aliyun_at_scr11_cloud_hold(void);
 void cloud_aliyun_at_request_mqtt_connect(void);
 void cloud_aliyun_at_mqtt_session_disconnect(void);
+uint8_t cloud_aliyun_at_mqtt_connecting(void);
 uint8_t cloud_aliyun_at_time_is_synced(void);
 
 #endif

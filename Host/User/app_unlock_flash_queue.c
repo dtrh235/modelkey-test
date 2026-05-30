@@ -5,6 +5,7 @@
 
 #include "./BSP/W25Q16/bsp_w25q16.h"
 #include "app_config.h"
+#include "app_wall_clock.h"
 #include "app_wifi_diag.h"
 #include "app_ccm_ram.h"
 
@@ -170,8 +171,8 @@ void app_unlock_flash_append(const char *account, uint8_t method_code, uint8_t d
 uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *ctx), void *ctx)
 {
     unlock_flash_rec_t rec;
+    char time_str[24];
     char payload[384];
-    uint32_t tshow;
     int rc;
 
     flash_load();
@@ -179,12 +180,15 @@ uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *c
         return 0u;
     }
     rec = s_blob.recs[0];
-    tshow = (rec.unlock_time_sec != 0u) ? rec.unlock_time_sec : rec.uptime_sec;
+    if(app_wall_clock_format_unlock_event(time_str, sizeof(time_str),
+                                          rec.unlock_time_sec, rec.uptime_sec) == 0u) {
+        return 0u;
+    }
     (void)snprintf(payload, sizeof(payload),
                    "{\"method\":\"thing.event.property.post\",\"id\":%lu,"
-                   "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%lu\","
+                   "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%s\","
                    "\"unlock_method\":%u,\"unlock_device\":%u},\"version\":\"1.0\"}",
-                   (unsigned long)rec.seq, rec.account, (unsigned long)tshow,
+                   (unsigned long)rec.seq, rec.account, time_str,
                    (unsigned)rec.method_code, (unsigned)rec.device_code);
     rc = publish_fn(payload, ctx);
     if(rc == 0) {

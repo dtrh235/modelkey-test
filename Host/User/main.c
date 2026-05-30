@@ -32,7 +32,8 @@
 #include "app_screen_wifi_flow.h"
 #include "cloud_legacy_adapter.h"
 #include "cloud_aliyun_at.h"
-#include "app_cloud_session.h"
+#include "app_link_guard.h"
+#include "cloud_ota_service.h"
 #include "app_state.h"
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
 #include "app_fp_mirror_tx.h"
@@ -177,6 +178,11 @@ static void app_cloud_task(void *argument)
 #if (APP_CLOUD_ENABLE == 1)
         /* ESP 复位+UART2 约 5s，须在调度器后执行，避免 main 里阻塞导致白屏 */
         if(s_cloud_boot_done == 0u) {
+            /* 勿在 WiFi 连接过程中复位 ESP，等本轮 connect 结束再 init */
+            if(app_wifi_connect_busy() != 0u || app_link_guard_wifi() != 0u) {
+                vTaskDelay(pdMS_TO_TICKS(20u));
+                continue;
+            }
             tcp_mqtt_init();
             s_cloud_boot_done = 1u;
             usart_debug_tx_str("[RTOS] ESP/UART2 init done\r\n");
@@ -199,15 +205,28 @@ static void app_cloud_task(void *argument)
         if(g_app_scr == APP_SCR_11) {
             uint8_t uart_work = app_wifi_scan_uart_busy();
             uint8_t conn_busy = app_wifi_connect_busy();
+            uint8_t mqtt_work = (uint8_t)(
+                cloud_aliyun_at_wifi_link_ready() != 0u ||
+                app_link_guard_active() != 0u ||
+                cloud_aliyun_at_wifi_bringup_active() != 0u);
+            uint8_t need_cloud = (uint8_t)(uart_work != 0u || conn_busy != 0u || mqtt_work != 0u);
 
-            if(uart_work != 0u || conn_busy != 0u) {
-                app_wifi_scan_cloud_tick();
-                cloud_aliyun_at_poll_5ms();
+            if(need_cloud != 0u) {
+                if(conn_busy != 0u || app_link_guard_mqtt() != 0u) {
+                    cloud_uart2_pump_rx(8u);
+                }
+                if(cloud_aliyun_at_poll_allowed(1u) != 0u) {
+                    cloud_aliyun_at_poll_5ms();
+                }
                 if(conn_busy != 0u) {
                     (void)app_wifi_connect_poll();
                 }
+                if(uart_work != 0u) {
+                    app_wifi_scan_cloud_tick();
+                }
+                cloud_ota_service_poll_5ms();
             }
-            vTaskDelay(pdMS_TO_TICKS((uart_work != 0u || conn_busy != 0u) ? 5u : 200u));
+            vTaskDelay(pdMS_TO_TICKS(need_cloud ? 5u : 200u));
             continue;
         }
 #endif
@@ -376,7 +395,10 @@ int main(void)
     delay_init(168);                    /* 初始化延时（W25Q 软 SPI 依赖 delay_us） */
     usart_init(115200);
     app_wifi_cfg_init_defaults();
-    usart_debug_tx_str("[FW] wifi_diag_trace_rev=54\r\n");
+    usart_debug_tx_str("[FW]r110\r\n");
+#if (APP_TIME_TRACE != 0)
+    usart_debug_tx_str("[TIME]trace on\r\n");
+#endif
 #if (APP_CLOUD_UART_DEBUG != 0)
     usart_debug_tx_str("[FW] cloud debug ON -> [ALIYUN] on USART1 PA9 115200\r\n");
 #endif

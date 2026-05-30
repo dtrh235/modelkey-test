@@ -22,9 +22,17 @@
 #define APP_ALIYUN_WIFI_PASSWORD   ""
 /* 0: no hardcoded AP auto-join; use remembered WiFi + scr11 auto-connect */
 #define APP_ALIYUN_WIFI_AUTO_JOIN  0
-/* SNTP：WiFi 联网后、连接阿里云 MQTT 前，通过模组 AT 同步网络时间（中国默认 UTC+8） */
+/* SNTP：模组 AT 校时（与 MQTT 不能同时发 AT，默认不在连 MQTT 前阻塞） */
 #define APP_ALIYUN_SNTP_ENABLE     1
 #define APP_ALIYUN_SNTP_TZ_HOURS   8
+/* 0=先连阿里云 MQTT（快）；1=先 ESP SNTP 再 MQTT（慢，约 20s+） */
+#ifndef APP_ALIYUN_SNTP_BEFORE_MQTT
+#define APP_ALIYUN_SNTP_BEFORE_MQTT  0
+#endif
+/* 0=关闭 HTTP 百度对时备用；MQTT NTP 仍可用 */
+#ifndef APP_ALIYUN_HTTP_DATE_ENABLE
+#define APP_ALIYUN_HTTP_DATE_ENABLE  0
+#endif
 /*
  * Fill with HMAC-SHA1 hex of:
  *   "clientId<CLIENTID>deviceName<DEVICENAME>productKey<PRODUCTKEY>"
@@ -61,7 +69,7 @@
 #endif
 /* 1=CWJAP 关键步骤固定串口日志（不占 printf，可与 APP_WIFI_UART_DEBUG=0 同开） */
 #ifndef APP_WIFI_CWJAP_TRACE
-#define APP_WIFI_CWJAP_TRACE     1
+#define APP_WIFI_CWJAP_TRACE     0
 #endif
 /* 1=CloudTask alive / wifi scan loop 心跳 */
 #ifndef APP_RTOS_HEARTBEAT_DEBUG
@@ -178,6 +186,22 @@
 /* 1: 云端/WiFi 诊断打到调试串口 USART6（与 APP_WIFI_UART_DEBUG 配合） */
 #ifndef APP_CLOUD_UART_DEBUG
 #define APP_CLOUD_UART_DEBUG     0
+#endif
+/* 1: 云端 MQTT/连接 固定短日志（已稳定，默认关） */
+#ifndef APP_CLOUD_TRACE
+#define APP_CLOUD_TRACE          0
+#endif
+/* 1: 仅时间同步/屏幕时钟 固定短日志（USART1 PA9，不占 printf Flash） */
+#ifndef APP_TIME_TRACE
+#define APP_TIME_TRACE           1
+#endif
+/* 1: WiFi 已连则 MQTT 长连，不再周期性 CIPCLOSE；离线开锁写 Flash，上线补传 */
+#ifndef APP_CLOUD_PERSISTENT_MQTT
+#define APP_CLOUD_PERSISTENT_MQTT  1
+#endif
+/* 1: 用户在 WiFi 页选网连上后走 MQTT 快路径（短 CIPSTART 超时/少 AT） */
+#ifndef APP_CLOUD_FAST_AFTER_WIFI_JOIN
+#define APP_CLOUD_FAST_AFTER_WIFI_JOIN  1
 #endif
 /* 1: 关闭 cloud_aliyun_at.c 内 printf（调试时由 APP_CLOUD_UART_DEBUG 强制打开） */
 #ifndef APP_HOST_SILENCE_ALIYUN_TERMINAL
