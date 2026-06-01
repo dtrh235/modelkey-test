@@ -28,6 +28,11 @@ void time_trace_tx(const char *s);
 #else
 #define TIME_TRACE_MSG(s)   ((void)0)
 #endif
+#if (APP_CLOUD_TRACE != 0)
+void cloud_trace_tx(const char *s);
+#define CLOUD_TRACE_MSG(s)  cloud_trace_tx(s)
+#else
 #define CLOUD_TRACE_MSG(s)  ((void)0)
+#endif
 
 #endif

@@ -487,7 +487,7 @@ static uint8_t aliyun_try_fetch_http_date_once(void)
             app_home_wall_clock_set(y, mo, d, hh, mm, ss);
             s_sntp_synced = 1u;
             s_ntp_synced = 1u;
-            TIME_TRACE_MSG("[TIME]Hok\r\n");
+            TIME_TRACE_MSG("[TIME] sync ok (HTTP date)\r\n");
             cloud_ota_service_flush_unlock_pending();
             return aliyun_http_date_finish(1u, used_mux1);
         }
@@ -720,7 +720,7 @@ static uint8_t sntp_apply_parsed_time(int year, int month, int day, int hh, int 
         app_home_wall_clock_set(year, month, day, hh, mm, ss);
         s_sntp_synced = 1u;
         s_ntp_synced = 1u;
-        TIME_TRACE_MSG("[TIME]Esp\r\n");
+        TIME_TRACE_MSG("[TIME] sync ok (ESP SNTP)\r\n");
         cloud_ota_service_flush_unlock_pending();
         return 1u;
     }
@@ -1189,15 +1189,14 @@ static void cwjap_build_cmd(char *cmd, size_t cmd_sz)
     cmd[n] = '\0';
 }
 
-static void cwjap_uart_settle(void)
-{
-    /* 默认软清理：硬件复位常等不到 ready，反而导致 busy p */
-    cwjap_modem_purge(0u);
-}
-
 /* connect 前已 teardown_idle：勿再连发十几条 AT，否则 CWJAP 易 busy p */
 static void cwjap_uart_settle_fast(void)
 {
+    if(s_cwjap_esp_idle_ok != 0u) {
+        CWJAP_TRACE_MSG("[WiFi] CWJAP fast settle skip (idle ok)\r\n");
+        s_modem_at_ok = 1u;
+        return;
+    }
     CWJAP_TRACE_MSG("[WiFi] CWJAP fast settle\r\n");
     g_wifi_scan_abort = 1u;
     g_wifi_scan_pending = 0u;
@@ -1210,6 +1209,12 @@ static void cwjap_uart_settle_fast(void)
         s_modem_at_ok = 0u;
     }
     cloud_uart2_rx_clear();
+}
+
+static void cwjap_uart_settle(void)
+{
+    /* connect 前已 teardown_idle 时勿再跑 modem_purge(3.5s+多轮 AT)，易误杀 CWJAP */
+    cwjap_uart_settle_fast();
 }
 
 static void cwjap_trace_fail_reason(void)
@@ -1862,7 +1867,7 @@ static uint8_t aliyun_ntp_apply_from_buf(const uint8_t *buf, uint16_t len)
     s_sntp_synced = 1u;
     s_ntp_await_until_ms = 0u;
     s_ntp_give_up = 0u;
-    TIME_TRACE_MSG("[TIME]Mok\r\n");
+    TIME_TRACE_MSG("[TIME] sync ok (MQTT NTP)\r\n");
     cloud_ota_service_flush_unlock_pending();
     return 1u;
 }
@@ -3287,15 +3292,25 @@ static uint8_t cloud_uart2_wait_esp_ready(uint32_t timeout_ms)
 static uint8_t cwjap_scr11_min_prep(void)
 {
     cloud_uart2_rx_clear();
+    /* 未连热点时 CWQAP 可能 ERROR，不因此失败 */
     (void)uart2_at_cmd_wait_ok("AT+CWQAP\r\n", 3000u);
     cloud_uart2_hw_drain_ms(400u);
     cloud_uart2_rx_clear();
-    if(uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", 5000u) == 0u) {
+    if(uart2_at_cmd_wait_ok("AT\r\n", 1500u) == 0u) {
+        CWJAP_TRACE_MSG("[WiFi] CWJAP min prep AT fail\r\n");
         return 0u;
     }
-    cloud_uart2_hw_drain_ms(800u);
     cloud_uart2_rx_clear();
-    /* min prep 后须重新探 idle，不可沿用 connect 阶段的 esp_idle_ok */
+    if(uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", 5000u) == 0u) {
+        cloud_uart2_hw_drain_ms(500u);
+        cloud_uart2_rx_clear();
+        if(uart2_at_cmd_wait_ok("AT+CWMODE=1\r\n", 5000u) == 0u) {
+            CWJAP_TRACE_MSG("[WiFi] CWJAP min prep CWMODE fail\r\n");
+            return 0u;
+        }
+    }
+    cloud_uart2_hw_drain_ms(400u);
+    cloud_uart2_rx_clear();
     s_cwjap_esp_idle_ok = 0u;
     return 1u;
 }
@@ -3378,9 +3393,15 @@ static void cwjap_modem_purge(uint8_t hard_reset)
     cloud_uart2_flush_rx();
     (void)uart2_send_text("ATE0\r\n");
     (void)uart2_wait_text("OK", ALIYUN_WAIT_SHORT_MS);
-    if(cloud_uart2_wait_modem_idle(12000u) == 0u) {
+    if(cloud_uart2_wait_modem_idle_ex(12000u, 1u) == 0u) {
         CWJAP_TRACE_MSG("[WiFi] CWJAP modem idle fail\r\n");
-        s_modem_at_ok = 0u;
+        /* Fallback: one-shot AT probe is enough to continue CWJAP path. */
+        if(uart2_at_cmd_wait_ok("AT\r\n", 1200u) != 0u) {
+            CWJAP_TRACE_MSG("[WiFi] CWJAP modem idle degraded-ok\r\n");
+            s_modem_at_ok = 1u;
+        } else {
+            s_modem_at_ok = 0u;
+        }
     } else {
         s_modem_at_ok = 1u;
     }
@@ -3393,8 +3414,12 @@ static void cwjap_modem_purge(uint8_t hard_reset)
     cloud_uart2_flush_rx();
     cloud_uart2_esp_hw_reset(1200u);
     (void)cloud_uart2_wait_esp_ready(5000u);
-    if(cloud_uart2_wait_modem_idle(12000u) == 0u) {
-        s_modem_at_ok = 0u;
+    if(cloud_uart2_wait_modem_idle_ex(12000u, 1u) == 0u) {
+        if(uart2_at_cmd_wait_ok("AT\r\n", 1200u) != 0u) {
+            s_modem_at_ok = 1u;
+        } else {
+            s_modem_at_ok = 0u;
+        }
     } else {
         s_modem_at_ok = 1u;
     }
@@ -3551,6 +3576,12 @@ static int cwk_finish_ok(void)
     cloud_uart2_wait_quiet_after_scan_abort(1500u);
     if(cloud_uart2_wait_modem_idle(8000u) == 0u) {
         CWJAP_TRACE_MSG("[WiFi] CWLAP finish idle fail\r\n");
+        printf("[WiFi] CWLAP finish idle fail\r\n");
+        cloud_uart2_set_ui_busy(0u);
+        s_cwk.fail_rc = -5;
+        cwk_reset();
+        uart2_mutex_give();
+        return -5;
     }
     cloud_uart2_set_ui_busy(0u);
     cwk_reset();
@@ -3583,21 +3614,35 @@ static int cwk_check_fail(void)
     uint32_t tnow = HAL_GetTick();
 
     if(cloud_uart2_rx_has("ERROR") != 0 || cloud_uart2_rx_has("FAIL") != 0) {
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        CWJAP_TRACE_MSG("[WiFi] CWLAP fail: ERROR/FAIL in rx\r\n");
+#endif
         return -6;
     }
     if((tnow - s_cwk.t0) >= CWK_TOTAL_MS) {
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        CWJAP_TRACE_MSG("[WiFi] CWLAP fail: total timeout\r\n");
+#endif
         return -5;
     }
     if(s_cwk.saw_cwlap == 0u) {
         if(s_cwk.pos == 0u && (tnow - s_cwk.t0) >= CWK_NO_DATA_MS) {
+#if (APP_WIFI_CWJAP_TRACE != 0)
+            CWJAP_TRACE_MSG("[WiFi] CWLAP fail: no data timeout\r\n");
+#endif
             return -5;
         }
     } else if((s_cwk.dst != NULL &&
-               (strstr(s_cwk.dst, "\r\nOK\r\n") != NULL || strstr(s_cwk.dst, "\nOK\r\n") != NULL)) ||
-              cloud_uart2_rx_has("\r\nOK\r\n") != 0) {
+               (strstr(s_cwk.dst, "\r\nOK\r\n") != NULL || strstr(s_cwk.dst, "\nOK\r\n") != NULL))) {
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        CWJAP_TRACE_MSG("[WiFi] CWLAP finish: got OK tail\r\n");
+#endif
         return 0;
     } else if((tnow - s_cwk.last_growth) >= CWK_IDLE_GAP_MS) {
         /* 仅空闲但未见完整 OK，不提前判收尾，继续等到总超时。 */
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        CWJAP_TRACE_MSG("[WiFi] CWLAP idle gap, waiting OK\r\n");
+#endif
         return 1;
     }
     return 1;
@@ -3989,7 +4034,8 @@ void cloud_aliyun_at_user_wifi_join_set_esp_idle_ok(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
     s_cwjap_esp_idle_ok = 1u;
-    s_cwjap_light_join = 1u;
+    /* Keep the idle hint, but avoid light-join fast path for stability. */
+    s_cwjap_light_join = 0u;
     s_cwjap_light_need_prep = 0u;
 #endif
 }
@@ -4011,6 +4057,7 @@ void cloud_aliyun_at_user_wifi_join_start(void)
     s_cifsr_retry_cnt = 0u;
     s_cifsr_last_try_ms = 0u;
     s_cwjap_busy_retry = 0u;
+    /* First attempt should not force channel; some APs roam channels and stale scan channel fails CWJAP. */
     s_cwjap_try_channel = 0u;
     s_cwjap_light_need_prep = 0u;
     /* s_cwjap_light_join 由 set_esp_idle_ok 置位；此处不清零 */
@@ -4577,14 +4624,19 @@ void cloud_aliyun_at_poll_5ms(void)
             }
             s_cwjap_uart_settle_done = 1u;
             if(s_modem_at_ok == 0u) {
-                CWJAP_TRACE_MSG("[WiFi] CWJAP purge fail\r\n");
-                if(s_user_wifi_join_st == 1u) {
-                    s_user_wifi_join_st = 3u;
+                if(s_cwjap_esp_idle_ok != 0u) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP purge fail ignored (scan idle ok)\r\n");
+                    s_modem_at_ok = 1u;
+                } else {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP purge fail\r\n");
+                    if(s_user_wifi_join_st == 1u) {
+                        s_user_wifi_join_st = 3u;
+                    }
+                    s_cwjap_esp_idle_ok = 0u;
+                    s_cwjap_light_join = 0u;
+                    s_step = ALIYUN_STEP_WIFI_IDLE;
+                    break;
                 }
-                s_cwjap_esp_idle_ok = 0u;
-                s_cwjap_light_join = 0u;
-                s_step = ALIYUN_STEP_WIFI_IDLE;
-                break;
             }
             s_cwjap_quiet_until_ms = HAL_GetTick() +
                 (s_cwjap_esp_idle_ok != 0u ? CWJAP_ESP_IDLE_HOLD_MS : 1500u);
@@ -4601,12 +4653,9 @@ void cloud_aliyun_at_poll_5ms(void)
                     CWJAP_TRACE_MSG("[WiFi] CWJAP min prep ok\r\n");
                 }
             } else if(s_cwjap_esp_idle_ok != 0u) {
-                prep_ok = cwjap_scr11_min_prep();
-                if(prep_ok != 0u) {
-                    CWJAP_TRACE_MSG("[WiFi] CWJAP min prep ok\r\n");
-                } else {
-                    CWJAP_TRACE_MSG("[WiFi] CWJAP min prep fail\r\n");
-                }
+                /* CWLAP/teardown 后已在 STA，勿再 CWQAP+CWMODE 搅乱模组 */
+                CWJAP_TRACE_MSG("[WiFi] CWJAP min prep skip (scan idle ok)\r\n");
+                prep_ok = 1u;
             } else {
             cloud_uart2_hw_drain_ms(150u);
             cloud_uart2_rx_clear();
@@ -4628,6 +4677,13 @@ void cloud_aliyun_at_poll_5ms(void)
             } else {
                 printf("[ALIYUN] STA radio prep fail\r\n");
                 uart2_log_rx_snapshot("STA prep fail");
+                if(s_user_wifi_join_st == 1u && g_app_scr == APP_SCR_11) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP prep fail, try CWJAP anyway\r\n");
+                    s_sta_radio_prep_done = 1u;
+                    s_modem_at_ok = 1u;
+                    s_cwjap_quiet_until_ms = HAL_GetTick() + 500u;
+                    break;
+                }
                 if(s_user_wifi_join_st == 1u) {
                     s_user_wifi_join_st = 3u;
                 }
@@ -4647,12 +4703,32 @@ void cloud_aliyun_at_poll_5ms(void)
             s_cwjap_quiet_until_ms = HAL_GetTick() + CWJAP_CWQAP_HOLD_MS;
             break;
         }
-        if(s_cwjap_light_join != 0u && s_cwjap_light_need_prep == 0u && s_cwjap_resend_only == 0u) {
-            CWJAP_TRACE_MSG("[WiFi] CWJAP light before send\r\n");
-            cloud_uart2_wait_quiet_after_scan_abort(CWJAP_LIGHT_BEFORE_SEND_MS);
-        } else {
-            CWJAP_TRACE_MSG("[WiFi] CWJAP modem idle probe\r\n");
-            if(cloud_uart2_wait_modem_idle_ex(10000u, 2u) == 0u) {
+        {
+            uint8_t idle_before_send_ok = 0u;
+
+            if(s_cwjap_esp_idle_ok != 0u && s_cwjap_resend_only == 0u) {
+                /* 扫描 teardown 已 idle，勿再连发 AT 探活（易 busy / 超时） */
+                CWJAP_TRACE_MSG("[WiFi] CWJAP idle skip probe (scan idle ok)\r\n");
+                cloud_uart2_flush_rx();
+                cloud_uart2_wait_quiet_after_scan_abort(CWJAP_LIGHT_BEFORE_SEND_MS);
+                idle_before_send_ok = 1u;
+            } else if(s_cwjap_light_join != 0u && s_cwjap_light_need_prep == 0u &&
+                      s_cwjap_resend_only == 0u) {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP light before send\r\n");
+                cloud_uart2_wait_quiet_after_scan_abort(CWJAP_LIGHT_BEFORE_SEND_MS);
+                idle_before_send_ok = 1u;
+            } else {
+                CWJAP_TRACE_MSG("[WiFi] CWJAP modem idle probe\r\n");
+                if(cloud_uart2_wait_modem_idle_ex(10000u, 2u) != 0u) {
+                    idle_before_send_ok = 1u;
+                    cloud_uart2_hw_drain_ms(600u);
+                } else if(uart2_at_cmd_wait_ok("AT\r\n", 2000u) != 0u) {
+                    CWJAP_TRACE_MSG("[WiFi] CWJAP idle degraded-ok\r\n");
+                    idle_before_send_ok = 1u;
+                    cloud_uart2_hw_drain_ms(300u);
+                }
+            }
+            if(idle_before_send_ok == 0u) {
                 CWJAP_TRACE_MSG("[WiFi] CWJAP not idle before send\r\n");
                 if(s_user_wifi_join_st == 1u) {
                     s_user_wifi_join_st = 3u;
@@ -4662,7 +4738,6 @@ void cloud_aliyun_at_poll_5ms(void)
                 s_step = ALIYUN_STEP_WIFI_IDLE;
                 break;
             }
-            cloud_uart2_hw_drain_ms(600u);
         }
         s_cwjap_esp_idle_ok = 0u;
 
@@ -4715,7 +4790,6 @@ void cloud_aliyun_at_poll_5ms(void)
             if((strstr(s_rx_win, "busy p") != NULL ||
                 (strstr(s_rx_win, "WIFI DISCONNECT") != NULL &&
                  strstr(s_rx_win, "WIFI GOT IP") == NULL)) &&
-               s_user_wifi_join_st != 1u &&
                s_cwjap_busy_retry < 2u) {
                 uint8_t idle_ok;
 

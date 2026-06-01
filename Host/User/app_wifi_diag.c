@@ -110,3 +110,14 @@ void time_trace_tx(const char *s)
     (void)s;
 #endif
 }
+
+void cloud_trace_tx(const char *s)
+{
+#if (APP_CLOUD_TRACE != 0)
+    if(s != NULL) {
+        usart_debug_tx_str(s);
+    }
+#else
+    (void)s;
+#endif
+}

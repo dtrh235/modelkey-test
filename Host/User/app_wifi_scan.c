@@ -105,6 +105,38 @@ static int s_scan_last_rc = 0;
 static uint8_t s_scan_hold_connect = 0u;
 static uint8_t s_scan_user_refresh = 0u;
 
+#if (APP_WIFI_CWJAP_TRACE != 0)
+static void wifi_scan_trace_rc(int rc)
+{
+    switch(rc) {
+    case -9:
+        usart_debug_tx_str("[WiFi] scan rc=-9 abort(stop/exclusive)\r\n");
+        break;
+    case -6:
+        usart_debug_tx_str("[WiFi] scan rc=-6 esp ERROR/FAIL/bad frame\r\n");
+        break;
+    case -5:
+        usart_debug_tx_str("[WiFi] scan rc=-5 timeout/no data/not idle\r\n");
+        break;
+    case -4:
+        usart_debug_tx_str("[WiFi] scan rc=-4 send AT+CWLAP fail\r\n");
+        break;
+    case -3:
+        usart_debug_tx_str("[WiFi] scan rc=-3 recover path failed\r\n");
+        break;
+    case -1:
+        usart_debug_tx_str("[WiFi] scan rc=-1 modem abort\r\n");
+        break;
+    case 0:
+        usart_debug_tx_str("[WiFi] scan rc=0 success\r\n");
+        break;
+    default:
+        usart_debug_tx_str("[WiFi] scan rc=other\r\n");
+        break;
+    }
+}
+#endif
+
 static void app_wifi_scan_abort_inflight_no_policy(void)
 {
     g_wifi_scan_abort = 1u;
@@ -405,12 +437,18 @@ static void wifi_scan_finish(int rc, uint16_t pos)
 
     if(rc == -9) {
         WIFI_DBG("scan abort -9 pend=%u", (unsigned)g_wifi_scan_pending);
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        wifi_scan_trace_rc(rc);
+#endif
         s_scan_st = SCAN_ST_IDLE;
         app_wifi_scan_release_uart2();
         return;
     }
     if(rc == -1) {
         WIFI_DBG("scan abort rc=-1 modem");
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        wifi_scan_trace_rc(rc);
+#endif
         s_scan_st = SCAN_ST_IDLE;
         g_wifi_scan_pending = 0u;
         app_wifi_scan_release_uart2();
@@ -419,6 +457,9 @@ static void wifi_scan_finish(int rc, uint16_t pos)
     s_list_dirty = 1u;
     if(rc < 0) {
         printf("[WiFi] scan fail rc=%d\r\n", rc);
+#if (APP_WIFI_CWJAP_TRACE != 0)
+        wifi_scan_trace_rc(rc);
+#endif
         s_scan_pass = 0u;
         s_scan_last_rc = rc;
         s_scan_st = SCAN_ST_IDLE;
@@ -429,6 +470,9 @@ static void wifi_scan_finish(int rc, uint16_t pos)
         return;
     }
     s_scan_pass = 1u;
+#if (APP_WIFI_CWJAP_TRACE != 0)
+    wifi_scan_trace_rc(0);
+#endif
     s_scan_last_rc = 0;
     scan_finish_parse();
     printf("[WiFi] scan OK ap=%u\r\n", (unsigned)s_ap_count);
@@ -709,11 +753,17 @@ void app_wifi_scan_request_now(void)
         cloud_aliyun_at_cwlap_scan_async_abort();
         s_scan_st = SCAN_ST_IDLE;
         cloud_uart2_set_ui_busy(0u);
+        (void)cloud_aliyun_at_cwlap_teardown_idle(2500u);
+    }
+    if(g_app_scr == APP_SCR_11) {
+        g_wifi_exclusive = 1u;
     }
     g_wifi_scan_abort = 0u;
+    s_scan_pass = 0u;
+    s_scan_last_rc = 0;
     s_scan_next_ms = HAL_GetTick();
     g_wifi_scan_pending = 1u;
-    WIFI_DBG("scan request_now pending=1 busy=%u", (unsigned)(s_scan_st == SCAN_ST_BUSY));
+    printf("[WiFi] scan request_now pend=1\r\n");
 #endif
 }
 
@@ -933,7 +983,12 @@ void app_wifi_scan_cloud_tick(void)
     app_wifi_scan_poll();
     if(s_scan_st == SCAN_ST_BUSY) {
         if(cloud_aliyun_at_cwlap_scan_async_active() == 0u) {
-            WIFI_DBG("scan stale busy");
+            printf("[WiFi] scan stale busy -> recover\r\n");
+            s_scan_st = SCAN_ST_IDLE;
+            cloud_uart2_set_ui_busy(0u);
+            if(g_wifi_scan_pending != 0u) {
+                return;
+            }
             wifi_scan_finish(-9, s_scan_pos);
             return;
         }
@@ -1232,6 +1287,7 @@ uint8_t app_wifi_connect_poll(void)
         }
 #endif
         s_conn_phase = CONN_PHASE_JOIN;
+        /* teardown 已成功：跳过 CWJAP 前重复 modem_purge */
         cloud_aliyun_at_user_wifi_join_set_esp_idle_ok();
         cloud_aliyun_at_user_wifi_join_start();
         return 0u;
@@ -1258,19 +1314,29 @@ uint8_t app_wifi_connect_poll(void)
         }
         if(cloud_aliyun_at_user_wifi_join_active() == 0u &&
            cloud_aliyun_at_wifi_bringup_active() == 0u &&
-           cloud_aliyun_at_wifi_link_ready() == 0u) {
+           cloud_aliyun_at_wifi_link_ready() == 0u &&
+           s_conn_phase == CONN_PHASE_JOIN) {
             if(s_conn_stale_ms == 0u) {
                 s_conn_stale_ms = now;
-            } else if((now - s_conn_stale_ms) >= 800u) {
+            } else if((now - s_conn_stale_ms) >= 2500u) {
                 char rx_hint[96];
                 s_conn_stale_ms = 0u;
                 cloud_uart2_copy_rx_win(rx_hint, sizeof(rx_hint));
                 if(strstr(rx_hint, "NO AP") != NULL || strstr(rx_hint, "no ap") != NULL) {
                     WIFI_DBG("connect fail: No AP (SSID/密码/2.4GHz?)");
+#if (APP_WIFI_CWJAP_TRACE != 0)
+                    usart_debug_tx_str("[WiFi] connect fail detail: NO AP\r\n");
+#endif
                 } else if(strstr(rx_hint, "busy p") != NULL) {
                     WIFI_DBG("connect fail: ESP busy (scan tail? retry)");
+#if (APP_WIFI_CWJAP_TRACE != 0)
+                    usart_debug_tx_str("[WiFi] connect fail detail: busy p\r\n");
+#endif
                 } else {
                     WIFI_DBG("connect fail: join ended (see rx)");
+#if (APP_WIFI_CWJAP_TRACE != 0)
+                    usart_debug_tx_str("[WiFi] connect fail detail: join ended\r\n");
+#endif
                 }
                 app_wifi_connect_fail(2u);
                 return 2u;

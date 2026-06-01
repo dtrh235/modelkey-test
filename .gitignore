@@ -1,4 +1,6 @@
 # Keil MDK build outputs
+**/build*.log
+build_log.txt
 **/Output/
 **/Listings/
 **/RTE/

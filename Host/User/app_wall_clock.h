@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 void app_home_wall_clock_set(int year, int month, int day, int hour, int min, int sec);
+void app_home_wall_clock_refresh_ui(void);
 uint8_t app_wall_clock_valid(void);
 uint32_t app_wall_clock_epoch_sec(void);
 void app_wall_clock_on_set(int year, int month, int day, int hour, int min, int sec);

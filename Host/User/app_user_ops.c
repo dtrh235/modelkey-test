@@ -1167,10 +1167,77 @@ bool users_try_register(const char *acc, const char *pwd, bool is_admin)
     return true;
 }
 
+uint8_t users_admin_count(void)
+{
+    uint8_t i;
+    uint8_t n = 0u;
+
+    if(!g_default_admin_deleted && g_default_admin_is_admin_role) {
+        n++;
+    }
+    for(i = 0u; i < g_user_count; i++) {
+        if(g_users[i].active && g_users[i].is_admin) {
+            n++;
+        }
+    }
+    return n;
+}
+
+uint8_t users_migrate_default_admin_to_users(void)
+{
+    int idx;
+
+    if(g_default_admin_deleted != 0u) {
+        return 0u;
+    }
+    if(g_default_admin_account[0] == '\0') {
+        g_default_admin_deleted = 1u;
+        g_default_admin_is_admin_role = 0u;
+        return 1u;
+    }
+
+    idx = users_find_index_by_acc(g_default_admin_account);
+    if(idx < 0) {
+        if(g_user_count >= APP_USER_MAX) {
+            return 0u;
+        }
+        idx = (int)g_user_count;
+        memset(&g_users[idx], 0, sizeof(g_users[idx]));
+        strncpy(g_users[idx].acc, g_default_admin_account, sizeof(g_users[idx].acc) - 1u);
+        g_users[idx].acc[sizeof(g_users[idx].acc) - 1u] = '\0';
+        strncpy(g_users[idx].pwd, g_default_admin_password, sizeof(g_users[idx].pwd) - 1u);
+        g_users[idx].pwd[sizeof(g_users[idx].pwd) - 1u] = '\0';
+        g_users[idx].active = 1u;
+        g_user_count++;
+    }
+
+    g_users[idx].is_admin = 1u;
+    g_users[idx].has_nfc = g_default_admin_has_nfc;
+    memcpy(g_users[idx].nfc_uid, g_default_admin_nfc_uid, sizeof(g_users[idx].nfc_uid));
+    g_users[idx].has_fp = g_default_admin_has_fp;
+    g_users[idx].fp_page_id_1 = g_default_admin_fp_page_id_1;
+    g_users[idx].fp_page_id_2 = g_default_admin_fp_page_id_2;
+
+    g_default_admin_deleted = 1u;
+    g_default_admin_is_admin_role = 0u;
+    g_default_admin_has_nfc = 0u;
+    memset(g_default_admin_nfc_uid, 0, sizeof(g_default_admin_nfc_uid));
+    g_default_admin_has_fp = 0u;
+    g_default_admin_fp_page_id_1 = 0xFFFFu;
+    g_default_admin_fp_page_id_2 = 0xFFFFu;
+    g_default_admin_account[0] = '\0';
+    g_default_admin_password[0] = '\0';
+    return 1u;
+}
+
 bool users_try_delete_by_acc(const char *acc)
 {
     int idx = users_find_index_by_acc(acc);
     if(idx < 0) {
+        cloud_ota_service_report_event(CLOUD_EVT_USER_DELETE_FAIL, acc);
+        return false;
+    }
+    if(g_users[idx].is_admin != 0u && users_admin_count() <= 1u) {
         cloud_ota_service_report_event(CLOUD_EVT_USER_DELETE_FAIL, acc);
         return false;
     }
@@ -1204,16 +1271,27 @@ bool default_admin_deleted(void)
 
 bool admin_credentials_match_with_delete(const char *acc, const char *pwd)
 {
-    if(strcmp(acc, g_default_admin_account) == 0 && default_admin_deleted()) {
-        return false;
+    if(default_admin_deleted() && strcmp(acc, g_default_admin_account) == 0) {
+        int idx = users_find_index_by_acc(acc);
+        if(idx < 0) {
+            return false;
+        }
+        if(!g_users[idx].is_admin) {
+            return false;
+        }
+        return strcmp(pwd, g_users[idx].pwd) == 0;
     }
     return admin_credentials_match(acc, pwd);
 }
 
 bool unlock_credentials_match_with_delete(const char *acc, const char *pwd)
 {
-    if(strcmp(acc, g_default_admin_account) == 0 && default_admin_deleted()) {
-        return false;
+    if(default_admin_deleted() && strcmp(acc, g_default_admin_account) == 0) {
+        int idx = users_find_index_by_acc(acc);
+        if(idx < 0) {
+            return false;
+        }
+        return strcmp(pwd, g_users[idx].pwd) == 0;
     }
     return unlock_credentials_match(acc, pwd);
 }

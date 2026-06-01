@@ -13,6 +13,7 @@
 #include "events_init.h"
 #include "widgets_init.h"
 #include "custom.h"
+#include "app_wall_clock.h"
 
 
 
@@ -153,7 +154,7 @@ void setup_scr_screen(lv_ui *ui)
     lv_obj_set_style_text_align(ui->screen_btn_3, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN|LV_STATE_DEFAULT);
 
     //The custom code of screen.
-
+    app_home_wall_clock_refresh_ui();
 
     //Update current screen layout.
     lv_obj_update_layout(ui->screen);

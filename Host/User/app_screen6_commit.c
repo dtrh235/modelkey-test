@@ -19,14 +19,23 @@ void screen6_save_identity(bool is_admin)
 {
     int idx;
     const char *acc = g_screen5_found_acc;
+    uint8_t now_admin = 0u;
 
     if(acc == NULL || acc[0] == '\0') return;
 
     if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
+        now_admin = g_default_admin_is_admin_role;
+        if(now_admin != 0u && !is_admin && users_admin_count() <= 1u) {
+            return;
+        }
         g_default_admin_is_admin_role = is_admin ? 1u : 0u;
     } else {
         idx = users_find_index_by_acc(acc);
         if(idx >= 0) {
+            now_admin = g_users[idx].is_admin;
+            if(now_admin != 0u && !is_admin && users_admin_count() <= 1u) {
+                return;
+            }
             g_users[idx].is_admin = is_admin ? 1u : 0u;
         }
     }

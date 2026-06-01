@@ -303,6 +303,7 @@ static void app_cloud_task(void *argument)
     }
 }
 
+#if (APP_TEMP_DISABLE_BIOMETRIC == 0)
 static void app_fp_task(void *argument)
 {
     TickType_t last_wake = xTaskGetTickCount();
@@ -339,6 +340,7 @@ static void app_home_auth_task(void *argument)
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10u));
     }
 }
+#endif
 
 static void app_storage_task(void *argument)
 {
@@ -359,10 +361,12 @@ static void app_create_tasks(void)
     configASSERT(xTaskCreate(app_cloud_task, "CloudTask", APP_TASK_STACK_CLOUD, NULL, APP_TASK_PRIO_CLOUD,
                              &s_cloud_task_hdl) == pdPASS);
     app_wifi_scan_bind_cloud_task(s_cloud_task_hdl);
+#if (APP_TEMP_DISABLE_BIOMETRIC == 0)
     configASSERT(xTaskCreate(app_fp_task, "FpTask", APP_TASK_STACK_FP, NULL, APP_TASK_PRIO_FP, NULL) == pdPASS);
     configASSERT(xTaskCreate(app_nfc_task, "NfcTask", APP_TASK_STACK_NFC, NULL, APP_TASK_PRIO_NFC, NULL) == pdPASS);
     configASSERT(xTaskCreate(app_home_auth_task, "HomeAuth", APP_TASK_STACK_HOME_AUTH, NULL,
                              APP_TASK_PRIO_HOME_AUTH, NULL) == pdPASS);
+#endif
     configASSERT(xTaskCreate(app_storage_task, "StorageTask", APP_TASK_STACK_STORAGE, NULL, APP_TASK_PRIO_STORAGE, NULL) == pdPASS);
 }
 
@@ -417,11 +421,14 @@ int main(void)
 #endif
     /* 外部 Flash 尽早访问：PA15/PB3/PB4 与 JTAG 复用，须在其它模块占 GPIO 前完成 */
     if(!users_storage_load()) {
-        strncpy(g_default_admin_account, ADMIN_DEFAULT_ACCOUNT, sizeof(g_default_admin_account) - 1u);
-        g_default_admin_account[sizeof(g_default_admin_account) - 1u] = '\0';
-        strncpy(g_default_admin_password, ADMIN_DEFAULT_PASSWORD, sizeof(g_default_admin_password) - 1u);
-        g_default_admin_password[sizeof(g_default_admin_password) - 1u] = '\0';
+        g_default_admin_deleted = 1u;
+        g_default_admin_is_admin_role = 0u;
+        g_default_admin_account[0] = '\0';
+        g_default_admin_password[0] = '\0';
+        (void)users_try_register("1", "1111", true);
         (void)users_try_register("2", "2222", false);
+        (void)users_storage_save();
+    } else if(users_migrate_default_admin_to_users() != 0u) {
         (void)users_storage_save();
     }
 
@@ -440,7 +447,9 @@ int main(void)
 
     /* MFRC522 必须做一次软复位才能进入正常读卡状态；否则首页"刷卡"读不到 UID。
      * 之前只在录入页才走 init_once（含 Reset），所以重启回到首页直接刷卡无法解锁。 */
+#if (APP_TEMP_DISABLE_BIOMETRIC == 0)
     app_nfc_hw_init_once();
+#endif
 
     btim_timx_int_init(1000 - 1, 84);   // 1ms中断初始化，重装载值、预分频值
     

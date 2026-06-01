@@ -6,6 +6,7 @@
 #include "./BSP/W25Q16/bsp_w25q16.h"
 #include "app_config.h"
 #include "app_wall_clock.h"
+#include "cloud_aliyun_at.h"
 #include "app_wifi_diag.h"
 #include "app_ccm_ram.h"
 
@@ -180,6 +181,9 @@ uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *c
         return 0u;
     }
     rec = s_blob.recs[0];
+    if(cloud_aliyun_at_time_is_synced() == 0u || app_wall_clock_valid() == 0u) {
+        return 0u;
+    }
     if(app_wall_clock_format_unlock_event(time_str, sizeof(time_str),
                                           rec.unlock_time_sec, rec.uptime_sec) == 0u) {
         return 0u;
