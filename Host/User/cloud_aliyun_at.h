@@ -29,6 +29,7 @@ void cloud_aliyun_at_wifi_join_diag_printf(void);
 #define cloud_aliyun_at_wifi_join_diag_printf() ((void)0)
 #endif
 uint8_t cloud_aliyun_at_publish_property(const char *json_payload);
+void cloud_aliyun_at_invalidate_unlock_flush(void);
 
 /* Shared UART2 (ESP WiFi) for WiFi settings UI scan/connect */
 void cloud_uart2_ensure_init(void);

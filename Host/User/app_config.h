@@ -44,7 +44,7 @@
 /* Feature / boot flags */
 #define APP_NFC_ENABLE          1
 #ifndef APP_TEMP_DISABLE_BIOMETRIC
-#define APP_TEMP_DISABLE_BIOMETRIC 1
+#define APP_TEMP_DISABLE_BIOMETRIC 0
 #endif
 #define APP_BOOT_VTOR_RELOCATE  0
 #define APP_USE_FREERTOS        1
@@ -192,11 +192,11 @@
 #endif
 /* 1: 云端 MQTT/连接 固定短日志（已稳定，默认关） */
 #ifndef APP_CLOUD_TRACE
-#define APP_CLOUD_TRACE          1
+#define APP_CLOUD_TRACE          0
 #endif
 /* 1: 时间同步固定短日志（USART 调试口，不占 printf Flash） */
 #ifndef APP_TIME_TRACE
-#define APP_TIME_TRACE           1
+#define APP_TIME_TRACE           0
 #endif
 /* 1: WiFi 已连则 MQTT 长连，不再周期性 CIPCLOSE；离线开锁写 Flash，上线补传 */
 #ifndef APP_CLOUD_PERSISTENT_MQTT

@@ -172,8 +172,8 @@ void app_unlock_flash_append(const char *account, uint8_t method_code, uint8_t d
 uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *ctx), void *ctx)
 {
     unlock_flash_rec_t rec;
-    char time_str[24];
     char payload[384];
+    char time_txt[24];
     int rc;
 
     flash_load();
@@ -184,20 +184,22 @@ uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *c
     if(cloud_aliyun_at_time_is_synced() == 0u || app_wall_clock_valid() == 0u) {
         return 0u;
     }
-    if(app_wall_clock_format_unlock_event(time_str, sizeof(time_str),
+    if(app_wall_clock_format_unlock_event(time_txt, sizeof(time_txt),
                                           rec.unlock_time_sec, rec.uptime_sec) == 0u) {
         return 0u;
     }
     (void)snprintf(payload, sizeof(payload),
                    "{\"method\":\"thing.event.property.post\",\"id\":%lu,"
                    "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%s\","
-                   "\"unlock_method\":%u,\"unlock_device\":%u},\"version\":\"1.0\"}",
-                   (unsigned long)rec.seq, rec.account, time_str,
-                   (unsigned)rec.method_code, (unsigned)rec.device_code);
+                   "\"unlock_method\":%u},\"version\":\"1.0\"}",
+                   (unsigned long)rec.seq, rec.account, time_txt,
+                   (unsigned)rec.method_code);
     rc = publish_fn(payload, ctx);
     if(rc == 0) {
+        WIFI_DBG("unlock flash pub fail seq=%lu", (unsigned long)rec.seq);
         return 0u;
     }
+    WIFI_DBG("unlock flash pub ok seq=%lu", (unsigned long)rec.seq);
     if(s_blob.count > 1u) {
         memmove(&s_blob.recs[0], &s_blob.recs[1],
                 sizeof(s_blob.recs[0]) * (size_t)(s_blob.count - 1u));

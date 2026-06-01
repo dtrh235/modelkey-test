@@ -9,6 +9,7 @@
 #include "app_wifi_scan.h"
 #include "app_link_guard.h"
 #include "cloud_ota_service.h"
+#include "app_unlock_flash_queue.h"
 
 uint8_t app_cloud_session_busy(void);
 #include "app_wifi_diag.h"
@@ -62,6 +63,7 @@ static void cwjap_modem_purge(uint8_t hard_reset);
 static uint8_t cloud_uart2_wait_esp_ready(uint32_t timeout_ms);
 static uint8_t cwjap_scr11_radio_prep(void);
 static uint8_t uart2_at_cmd_wait_ok(const char *cmd, uint32_t timeout_ms);
+static void uart2_pump_rx_core(uint32_t duration_ms, uint8_t ignore_ui_busy);
 
 typedef enum {
     ALIYUN_STEP_IDLE = 0,
@@ -208,6 +210,10 @@ static void uart2_irq_enable(void)
     s_uart2_irq_on = 1u;
 }
 static uint32_t s_last_ping_ms = 0u;
+static uint32_t s_mqtt_online_ms = 0u;
+static uint8_t s_unlock_flush_done = 0u;
+static uint32_t s_unlock_flush_last_ms = 0u;
+#define ALIYUN_UNLOCK_FLUSH_RETRY_MS 10000u
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
 static uint32_t s_sntp_wait_until_ms = 0u;
 static uint8_t s_sntp_try_cnt = 0u;
@@ -215,6 +221,9 @@ static uint8_t s_sntp_empty_cnt = 0u;
 static uint32_t s_sntp_next_query_ms = 0u;
 static uint32_t s_sntp_deadline_ms = 0u;
 static uint8_t s_sntp_synced = 0u;
+static uint8_t s_sntp_time_updated_seen = 0u;
+static uint32_t s_sntp_time_updated_ms = 0u;
+static uint32_t s_sntp_query_start_ms = 0u;
 static uint32_t s_sntp_retry_online_ms = 0u;
 static uint8_t s_http_date_tried = 0u;
 #endif
@@ -234,6 +243,9 @@ static uint8_t s_ntp_give_up = 0u;
 static uint32_t s_ntp_next_try_ms = 0u;
 static uint8_t s_ntp_sync_running = 0u;
 static uint8_t s_ntp_connect_tried = 0u;
+static uint8_t s_ntp_mqtt_fail_cnt = 0u;
+/* ~2025-06-01 UTC+8 秒级起点 + HAL_GetTick 组成 deviceSendTime 字符串 */
+#define NTP_DEVTIME_SEC_BASE  1748736000UL
 static uint8_t s_ping_fail_streak = 0u;
 static uint16_t s_mqtt_pkt_id = 1u;
 static uint8_t s_uart_ui_busy = 0u;
@@ -331,8 +343,8 @@ static uint8_t cwlap_scan_should_stop(void)
 #define ALIYUN_SNTP_ONLINE_RETRY_MS 30000u
 #define ALIYUN_HTTP_DATE_HOST "www.baidu.com"
 #define ALIYUN_MQTT_NTP_RSP_WAIT_MS   15000u
-#define ALIYUN_MQTT_NTP_SUB_SETTLE_MS 2000u
-#define ALIYUN_MQTT_NTP_RETRY_ONLINE_MS 60000u
+#define ALIYUN_MQTT_NTP_SUB_SETTLE_MS 800u
+#define ALIYUN_MQTT_NTP_RETRY_ONLINE_MS 5000u
 #define ALIYUN_MQTT_NTP_POLL_SLICE_MS 80u
 
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
@@ -716,11 +728,28 @@ static uint8_t sntp_parse_epoch_digits(const char *s)
 
 static uint8_t sntp_apply_parsed_time(int year, int month, int day, int hh, int mm, int ss)
 {
+    int lag_sec = 0;
+    uint32_t now_ms;
+
     if(year >= 2020 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-        app_home_wall_clock_set(year, month, day, hh, mm, ss);
+        now_ms = HAL_GetTick();
+        if(s_sntp_time_updated_ms != 0u && now_ms >= s_sntp_time_updated_ms) {
+            lag_sec = (int)((now_ms - s_sntp_time_updated_ms) / 1000u);
+        } else if(s_sntp_query_start_ms != 0u && now_ms >= s_sntp_query_start_ms) {
+            lag_sec = (int)((now_ms - s_sntp_query_start_ms) / 1000u);
+        }
+        if(lag_sec < 0) {
+            lag_sec = 0;
+        }
+        if(lag_sec > 120) {
+            lag_sec = 120;
+        }
+        app_wall_clock_set_local(year, month, day, hh, mm, ss, lag_sec);
+        app_home_wall_clock_refresh_ui();
         s_sntp_synced = 1u;
         s_ntp_synced = 1u;
         TIME_TRACE_MSG("[TIME] sync ok (ESP SNTP)\r\n");
+        cloud_aliyun_at_invalidate_unlock_flush();
         cloud_ota_service_flush_unlock_pending();
         return 1u;
     }
@@ -758,9 +787,7 @@ static uint8_t sntp_try_parse_line(const char *p)
             tail = body;
         }
 
-        if(sntp_parse_epoch_digits(tail) != 0u) {
-            return 1u;
-        }
+        /* 先解析 ESP 已按 CIPSNTPCFG 时区换算过的本地时间字符串，再尝试 Unix epoch */
         if(sscanf(p, "+CIPSNTPTIME:%*u,\"%*[^\"]\",%*3s %3s %d %d:%d:%d %d",
                   mon, &day, &hh, &mm, &ss, &year) == 6 ||
            sscanf(p, "+CIPSNTPTIME:%*u,\"%*[^\"]\",%d-%d-%d,%d:%d:%d",
@@ -781,19 +808,15 @@ static uint8_t sntp_try_parse_line(const char *p)
            sscanf(tail, "%d-%d-%d,%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6) {
             return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
         }
-        if(sscanf(p, "+CIPSNTPTIME:%11s %3s %d %d:%d:%d %d", mon, &day, &hh, &mm, &ss, &year) == 6 ||
-           sscanf(p, "+CIPSNTPTIME:%d-%d-%d,%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6) {
-            if(month < 1 || month > 12) {
-                month = month_abbr_to_i(mon);
-            }
-            return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
-        }
         if(sscanf(tail, "%*3s %3s %d %d:%d:%d %d", mon, &day, &hh, &mm, &ss, &year) == 6) {
             month = month_abbr_to_i(mon);
             return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
         }
         if(sscanf(tail, "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hh, &mm, &ss) == 6) {
             return sntp_apply_parsed_time(year, month, day, hh, mm, ss);
+        }
+        if(sntp_parse_epoch_digits(tail) != 0u) {
+            return 1u;
         }
     }
 
@@ -859,6 +882,7 @@ static uint8_t aliyun_try_fetch_sntp_once(void)
     char *p;
 
     cloud_uart2_rx_clear();
+    s_sntp_query_start_ms = HAL_GetTick();
     if(!uart2_send_text("AT+CIPSNTPTIME?\r\n")) {
         TIME_TRACE_MSG("[TIME]Esf\r\n");
         return 0u;
@@ -1851,23 +1875,25 @@ static uint8_t aliyun_ntp_apply_from_buf(const uint8_t *buf, uint16_t len)
         accurate_ms += (device_recv - device_send) / 2u;
     }
     if(accurate_ms < 1000000000000ull) {
-        TIME_TRACE_MSG("[TIME]Mbd\r\n");
+        TIME_TRACE_MSG("[TIME] NTP bad epoch ms\r\n");
         return 0u;
     }
     if(epoch_to_local_datetime(accurate_ms / 1000u, APP_ALIYUN_SNTP_TZ_HOURS, &y, &mo, &d, &h, &mi, &s) == 0u) {
-        TIME_TRACE_MSG("[TIME]Mbd\r\n");
+        TIME_TRACE_MSG("[TIME] NTP epoch to local fail\r\n");
         return 0u;
     }
     if(y < 2020) {
-        TIME_TRACE_MSG("[TIME]Mby\r\n");
+        TIME_TRACE_MSG("[TIME] NTP year invalid\r\n");
         return 0u;
     }
     app_home_wall_clock_set(y, mo, d, h, mi, s);
+    app_home_wall_clock_refresh_ui();
     s_ntp_synced = 1u;
     s_sntp_synced = 1u;
     s_ntp_await_until_ms = 0u;
     s_ntp_give_up = 0u;
     TIME_TRACE_MSG("[TIME] sync ok (MQTT NTP)\r\n");
+    cloud_aliyun_at_invalidate_unlock_flush();
     cloud_ota_service_flush_unlock_pending();
     return 1u;
 }
@@ -1946,49 +1972,183 @@ static uint8_t aliyun_ntp_try_parse_any(void)
     return aliyun_ntp_try_all_ipd_in_rx_win();
 }
 
-/* r110 同款：MQTT 在线后非阻塞 NTP（Msb→Mrq→收 +IPD→Mok），不阻塞 UI */
+static uint8_t aliyun_mqtt_suback_in_buf(const uint8_t *buf, uint16_t len)
+{
+    uint16_t i;
+
+    if(buf == NULL || len < 4u) {
+        return 0u;
+    }
+    for(i = 0u; (uint16_t)(i + 3u) < len; i++) {
+        if(buf[i] == 0x90u) {
+            return 1u;
+        }
+    }
+    return 0u;
+}
+
+static uint8_t aliyun_mqtt_suback_in_rx(void)
+{
+    if(aliyun_mqtt_suback_in_buf((const uint8_t *)s_rx_win, s_rx_win_pos) != 0u) {
+        return 1u;
+    }
+    return 0u;
+}
+
+/* 超时诊断：看 UART 是否收到 +IPD / NTP JSON */
+static void aliyun_ntp_rx_diag_trace(void)
+{
+    if(strstr(s_rx_win, "serverSendTime") != NULL) {
+        TIME_TRACE_MSG("[TIME] rx has NTP JSON unparsed\r\n");
+    } else if(strstr(s_rx_win, "+IPD") != NULL) {
+        TIME_TRACE_MSG("[TIME] rx +IPD no NTP JSON\r\n");
+    } else if(s_rx_win_pos > 0u) {
+        TIME_TRACE_MSG("[TIME] rx data no +IPD\r\n");
+    } else {
+        TIME_TRACE_MSG("[TIME] rx empty (no +IPD)\r\n");
+    }
+}
+
+static void aliyun_ntp_format_req_payload(char *buf, size_t bufsz, uint32_t tick_ms)
+{
+    unsigned long sec;
+    unsigned long ms3 = (unsigned long)(tick_ms % 1000u);
+
+    if(buf == NULL || bufsz < 32u) {
+        return;
+    }
+    if(app_wall_clock_valid() != 0u) {
+        sec = (unsigned long)app_wall_clock_epoch_sec();
+    } else {
+        sec = NTP_DEVTIME_SEC_BASE + (unsigned long)(tick_ms / 1000u);
+    }
+    (void)snprintf(buf, bufsz,
+                   "{\"deviceSendTime\":\"%lu%03lu\"}",
+                   sec, ms3);
+}
+
+static void aliyun_ntp_fallback_to_esp_sntp(void)
+{
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+    TIME_TRACE_MSG("[TIME] MQTT NTP fail -> ESP SNTP\r\n");
+    aliyun_mqtt_close_link0();
+    s_ntp_sub_sess = 0u;
+    s_ntp_sub_ok = 0u;
+    s_ntp_await_until_ms = 0u;
+    s_ntp_next_request_ms = 0u;
+    s_step = ALIYUN_STEP_SNTP_CFG;
+    s_step_ms = HAL_GetTick();
+#else
+    (void)0;
+#endif
+}
+
+/* MQTT 在线后非阻塞 NTP：subscribe → 等 SUBACK → publish → 等 +IPD JSON */
 static void aliyun_ntp_try_sync_online(void)
 {
     uint8_t pkt[256];
     uint16_t pkt_len;
     uint8_t rx[384];
     uint16_t rx_len = 0u;
-    static const char req_payload[] = "{\"id\":\"1\",\"version\":\"1.0\",\"params\":{}}";
+    char req_payload[56];
+    uint32_t now = HAL_GetTick();
+    uint32_t slice0 = now;
 
     if(s_ntp_synced != 0u || app_wall_clock_valid() != 0u) {
         s_ntp_synced = 1u;
         return;
     }
-    if(s_ntp_connect_tried == 0u) {
+    if(s_ntp_connect_tried == 0u || s_step != ALIYUN_STEP_ONLINE) {
         return;
     }
 
-    uart2_drain_rx_ms(30u);
+    uart2_pump_rx_core(12u, 1u);
     if(aliyun_ntp_try_parse_any() != 0u) {
+        s_ntp_mqtt_fail_cnt = 0u;
         return;
+    }
+
+    if(s_ntp_await_until_ms != 0u && (int32_t)(now - (int32_t)s_ntp_await_until_ms) < 0) {
+        while((int32_t)(HAL_GetTick() - (int32_t)slice0) < (int32_t)ALIYUN_MQTT_NTP_POLL_SLICE_MS) {
+            uart2_pump_rx_core(12u, 1u);
+            if(aliyun_ntp_try_parse_any() != 0u) {
+                s_ntp_mqtt_fail_cnt = 0u;
+                return;
+            }
+            if(uart2_recv_ipd_payload(rx, sizeof(rx), &rx_len, 40u) != 0) {
+                (void)aliyun_ntp_apply_from_mqtt_chunk(rx, rx_len);
+                if(s_ntp_synced != 0u) {
+                    s_ntp_mqtt_fail_cnt = 0u;
+                    return;
+                }
+            }
+            uart2_coop_yield();
+        }
+        return;
+    }
+
+    if(s_ntp_await_until_ms != 0u && s_ntp_synced == 0u) {
+        uart2_pump_rx_core(80u, 1u);
+        (void)aliyun_ntp_try_parse_any();
+        if(s_ntp_synced != 0u) {
+            s_ntp_mqtt_fail_cnt = 0u;
+            return;
+        }
+        aliyun_ntp_rx_diag_trace();
+        TIME_TRACE_MSG("[TIME] NTP wait timeout\r\n");
+        s_ntp_await_until_ms = 0u;
+        s_ntp_mqtt_fail_cnt++;
+        if(s_ntp_mqtt_fail_cnt >= 2u) {
+            aliyun_ntp_fallback_to_esp_sntp();
+            return;
+        }
     }
 
     if(s_ntp_sub_sess == 0u) {
         pkt_len = build_mqtt_subscribe_qos0(pkt, sizeof(pkt), s_mqtt_pkt_id++, s_ntp_resp_topic);
         if(pkt_len == 0u || mqtt_send_packet(pkt, pkt_len) == 0u) {
+            TIME_TRACE_MSG("[TIME] NTP subscribe fail\r\n");
             return;
         }
         s_ntp_sub_sess = 1u;
-        TIME_TRACE_MSG("[TIME]Msb\r\n");
+        s_ntp_sub_ok = 0u;
+        s_ntp_sub_ms = now;
+        TIME_TRACE_MSG("[TIME] NTP subscribe sent\r\n");
+        return;
     }
 
-    if(s_ntp_next_request_ms == 0u ||
-       (int32_t)(HAL_GetTick() - (int32_t)s_ntp_next_request_ms) >= (int32_t)ALIYUN_MQTT_NTP_RETRY_ONLINE_MS) {
-        pkt_len = build_mqtt_publish_qos0(pkt, sizeof(pkt), s_ntp_req_topic, req_payload);
-        if(pkt_len > 0u && mqtt_send_packet(pkt, pkt_len) != 0u) {
-            s_ntp_req_dev_ms = HAL_GetTick();
-            s_ntp_next_request_ms = HAL_GetTick();
-            TIME_TRACE_MSG("[TIME]Mrq\r\n");
+    if(s_ntp_sub_ok == 0u) {
+        uart2_pump_rx_core(16u, 1u);
+        if(aliyun_mqtt_suback_in_rx() != 0u) {
+            s_ntp_sub_ok = 1u;
+            TIME_TRACE_MSG("[TIME] NTP subscribe ok\r\n");
+        } else if((now - s_ntp_sub_ms) < ALIYUN_MQTT_NTP_SUB_SETTLE_MS) {
+            return;
+        } else {
+            s_ntp_sub_ok = 1u;
+            TIME_TRACE_MSG("[TIME] NTP subscribe settle\r\n");
         }
     }
 
-    if(uart2_recv_ipd_payload(rx, sizeof(rx), &rx_len, 20u) != 0) {
-        (void)aliyun_ntp_apply_from_mqtt_chunk(rx, rx_len);
+    if(s_ntp_next_request_ms != 0u &&
+       (int32_t)(now - (int32_t)s_ntp_next_request_ms) < (int32_t)ALIYUN_MQTT_NTP_RETRY_ONLINE_MS) {
+        return;
+    }
+
+    /* 阿里云 NTP：payload 须含 deviceSendTime 13 位毫秒字符串 */
+    s_ntp_req_dev_ms = now;
+    aliyun_ntp_format_req_payload(req_payload, sizeof(req_payload), now);
+    pkt_len = build_mqtt_publish_qos0(pkt, sizeof(pkt), s_ntp_req_topic, req_payload);
+    if(pkt_len == 0u || mqtt_send_packet(pkt, pkt_len) == 0u) {
+        TIME_TRACE_MSG("[TIME] NTP request fail\r\n");
+        return;
+    }
+    s_ntp_next_request_ms = now;
+    s_ntp_await_until_ms = now + ALIYUN_MQTT_NTP_RSP_WAIT_MS;
+    TIME_TRACE_MSG("[TIME] NTP request sent\r\n");
+    uart2_pump_rx_core(120u, 1u);
+    if(aliyun_ntp_try_parse_any() != 0u) {
+        s_ntp_mqtt_fail_cnt = 0u;
     }
 }
 #endif
@@ -2045,6 +2205,7 @@ void cloud_aliyun_at_init(void)
     s_http_date_tried = 0u;
 #endif
     s_ntp_synced = 0u;
+    s_ntp_mqtt_fail_cnt = 0u;
     s_ntp_next_request_ms = 0u;
     s_mqtt_pkt_id = 1u;
     s_modem_at_ok = 0u;
@@ -2086,8 +2247,8 @@ uint8_t cloud_aliyun_at_poll_allowed(uint8_t on_wifi_scr)
     if(s_user_wifi_join_st == 1u) {
         return 1u;
     }
-    /* CWJAP 已成功、尚未拿到 IP/上 MQTT：离开 WiFi 页也要继续跑 FSM */
-    if(s_step >= ALIYUN_STEP_CIFSR && s_step <= ALIYUN_STEP_WAIT_CONNACK) {
+    /* MQTT 在线或建链中：离 WiFi 页也要收 NTP +IPD */
+    if(s_step >= ALIYUN_STEP_CIFSR && s_step <= ALIYUN_STEP_ONLINE) {
         return 1u;
     }
     return 0u;
@@ -2161,7 +2322,7 @@ static void cloud_uart2_rx_push_char(char ch)
     s_rx_win[sizeof(s_rx_win) - 1u] = '\0';
 }
 
-void cloud_uart2_pump_rx(uint32_t duration_ms)
+static void uart2_pump_rx_core(uint32_t duration_ms, uint8_t ignore_ui_busy)
 {
     uint8_t ch = 0u;
     uint32_t end;
@@ -2172,16 +2333,23 @@ void cloud_uart2_pump_rx(uint32_t duration_ms)
         return;
     }
 #endif
-    if(s_uart_ui_busy != 0u) {
+    if(ignore_ui_busy == 0u && s_uart_ui_busy != 0u) {
         return;
     }
     uart2_init_once();
-    if(duration_ms == 0u) return;
+    if(duration_ms == 0u) {
+        return;
+    }
     end = HAL_GetTick() + duration_ms;
     while((HAL_GetTick() < end) != 0u) {
         (void)uart2_read_byte_timeout(&ch, 8u);
         uart2_coop_yield();
     }
+}
+
+void cloud_uart2_pump_rx(uint32_t duration_ms)
+{
+    uart2_pump_rx_core(duration_ms, 0u);
 }
 
 uint16_t cloud_uart2_collect_to(char *dst, uint16_t dst_sz, uint16_t dst_pos, uint32_t duration_ms)
@@ -2284,6 +2452,7 @@ static void aliyun_mqtt_uart_prep(void)
 
 static void aliyun_mqtt_close_link0(void)
 {
+    s_unlock_flush_done = 0u;
     cloud_uart2_drain_until_idle(60u, 10u);
     (void)uart2_send_text("AT+CIPCLOSE=0\r\n");
     (void)uart2_wait_text("OK", 150u);
@@ -4219,11 +4388,13 @@ static void cloud_aliyun_at_mqtt_kick_after_wifi(void)
     if(s_step >= ALIYUN_STEP_CIPSTART && s_step <= ALIYUN_STEP_WAIT_CONNACK) {
         return;
     }
-#if (APP_ALIYUN_SNTP_ENABLE == 1) && (APP_ALIYUN_SNTP_BEFORE_MQTT != 0)
-    if(app_wall_clock_valid() == 0u && s_sntp_synced == 0u && s_http_date_tried == 0u &&
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+    /* 无墙钟时先 ESP SNTP 再 MQTT，避免 MQTT-NTP 无 +IPD 时永远无时间 */
+    if(app_wall_clock_valid() == 0u && s_sntp_synced == 0u &&
        s_step != ALIYUN_STEP_SNTP_CFG && s_step != ALIYUN_STEP_SNTP_WAIT &&
-       s_step != ALIYUN_STEP_SNTP_TIME) {
-        TIME_TRACE_MSG("[TIME]Ego\r\n");
+       s_step != ALIYUN_STEP_SNTP_TIME &&
+       s_step < ALIYUN_STEP_CIPSTART) {
+        TIME_TRACE_MSG("[TIME] ESP SNTP before MQTT\r\n");
         s_step = ALIYUN_STEP_SNTP_CFG;
         s_step_ms = HAL_GetTick();
         return;
@@ -4312,6 +4483,141 @@ uint8_t cloud_aliyun_at_time_is_synced(void)
 #endif
 }
 
+/* 从 UART 窗口或 +IPD MQTT 载荷中解析物模型 post_reply 的 code */
+static int aliyun_thing_model_code_from_buf(const char *buf, uint16_t len)
+{
+    const char *p;
+    const char *end;
+    int code = -1;
+
+    if(buf == NULL || len < 8u) {
+        return -1;
+    }
+    end = buf + len;
+    for(p = buf; p + 7u < end; p++) {
+        if(p[0] != '"' || p[1] != 'c') {
+            continue;
+        }
+        if(strncmp(p, "\"code\":", 7) == 0) {
+            if(sscanf(p + 7, "%d", &code) == 1) {
+                return code;
+            }
+        } else if(strncmp(p, "\"code\": ", 8) == 0) {
+            if(sscanf(p + 8, "%d", &code) == 1) {
+                return code;
+            }
+        }
+    }
+    return -1;
+}
+
+static uint8_t aliyun_property_post_reply_code_seen(int code)
+{
+    if(code == 200) {
+        return 1u;
+    }
+    if(code >= 0 && code != 200) {
+        return 2u; /* 明确失败 */
+    }
+    return 0u;
+}
+
+/* 0=云端明确拒绝(code!=200)，1=成功(code==200 或未收到明确错误，与 Client 一致) */
+static uint8_t aliyun_property_post_result(uint32_t wait_ms)
+{
+    uint32_t t0 = HAL_GetTick();
+    uint8_t resp[384];
+    uint16_t rlen = 0u;
+    int code;
+    uint8_t seen;
+
+    while((HAL_GetTick() - t0) < wait_ms) {
+        uart2_pump_rx_core(16u, 1u);
+        code = aliyun_thing_model_code_from_buf(s_rx_win, s_rx_win_pos);
+        seen = aliyun_property_post_reply_code_seen(code);
+        if(seen == 1u) {
+            return 1u;
+        }
+        if(seen == 2u) {
+#if (APP_CLOUD_TRACE != 0)
+            {
+                char tr[40];
+                (void)snprintf(tr, sizeof(tr), "[UNLOCK] pub code=%d\r\n", code);
+                cloud_trace_tx(tr);
+            }
+#endif
+            return 0u;
+        }
+
+        if(uart2_recv_ipd_payload(resp, sizeof(resp), &rlen, 50u) != 0) {
+            code = aliyun_thing_model_code_from_buf((const char *)resp, rlen);
+            seen = aliyun_property_post_reply_code_seen(code);
+            if(seen == 1u) {
+                return 1u;
+            }
+            if(seen == 2u) {
+#if (APP_CLOUD_TRACE != 0)
+                {
+                    char tr[40];
+                    (void)snprintf(tr, sizeof(tr), "[UNLOCK] pub code=%d\r\n", code);
+                    cloud_trace_tx(tr);
+                }
+#endif
+                return 0u;
+            }
+        }
+    }
+    return 1u;
+}
+
+static uint8_t aliyun_unlock_publish_uart_idle(void)
+{
+    if(app_wifi_connect_busy() != 0u) {
+        return 0u;
+    }
+    if(app_wifi_scan_busy() != 0u || app_wifi_scan_has_pending() != 0u) {
+        return 0u;
+    }
+    if(cloud_aliyun_at_cwlap_scan_async_active() != 0u) {
+        return 0u;
+    }
+    if(cloud_aliyun_at_user_wifi_join_active() != 0u ||
+       cloud_aliyun_at_wifi_bringup_active() != 0u) {
+        return 0u;
+    }
+    return 1u;
+}
+
+void cloud_aliyun_at_invalidate_unlock_flush(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    s_unlock_flush_done = 0u;
+    s_unlock_flush_last_ms = 0u;
+#else
+    (void)0;
+#endif
+}
+
+static void aliyun_unlock_flush_if_due(uint8_t force_now)
+{
+    uint32_t now = HAL_GetTick();
+
+    if(app_unlock_flash_count() == 0u) {
+        if(s_unlock_flush_done == 0u) {
+            s_unlock_flush_done = 1u;
+        }
+        return;
+    }
+    if(force_now == 0u && (now - s_unlock_flush_last_ms) < ALIYUN_UNLOCK_FLUSH_RETRY_MS) {
+        return;
+    }
+    s_unlock_flush_last_ms = now;
+    cloud_ota_service_flush_unlock_pending();
+    if(app_unlock_flash_count() == 0u) {
+        s_unlock_flush_done = 1u;
+    }
+}
+
 uint8_t cloud_aliyun_at_publish_property(const char *json_payload)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
@@ -4321,25 +4627,49 @@ uint8_t cloud_aliyun_at_publish_property(const char *json_payload)
 
     if(json_payload == NULL || json_payload[0] == '\0') return 0u;
     if(s_step != ALIYUN_STEP_ONLINE) {
-        CLOUD_TRACE_MSG("[CLOUD] property skip (not online)\r\n");
+        CLOUD_TRACE_MSG("[UNLOCK] pub skip not online\r\n");
         return 0u;
     }
+    if(aliyun_unlock_publish_uart_idle() == 0u) {
+        CLOUD_TRACE_MSG("[UNLOCK] pub skip uart busy\r\n");
+        return 0u;
+    }
+    aliyun_mqtt_uart_prep();
 
     pkt_len = build_mqtt_publish_qos0(pkt, sizeof(pkt), s_prop_post_topic, json_payload);
-    if(pkt_len == 0u) return 0u;
-
-    snprintf(cmd, sizeof(cmd), "AT+CIPSEND=0,%u\r\n", (unsigned)pkt_len);
-    if(!(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_WAIT_MID_MS))) return 0u;
-    if(!uart2_send_bytes(pkt, pkt_len)) return 0u;
-    if(!uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS)) {
-        CLOUD_TRACE_MSG("[CLOUD] property post fail\r\n");
+    if(pkt_len == 0u) {
+        CLOUD_TRACE_MSG("[UNLOCK] pub build fail\r\n");
         return 0u;
     }
-    CLOUD_TRACE_MSG("[CLOUD] property post ok\r\n");
-    uart2_drain_rx_ms(30u);
+
+    snprintf(cmd, sizeof(cmd), "AT+CIPSEND=0,%u\r\n", (unsigned)pkt_len);
+    if(!(uart2_send_text(cmd) && uart2_wait_text(">", ALIYUN_WAIT_MID_MS))) {
+        CLOUD_TRACE_MSG("[UNLOCK] pub CIPSEND fail\r\n");
+        return 0u;
+    }
+    if(!uart2_send_bytes(pkt, pkt_len)) {
+        CLOUD_TRACE_MSG("[UNLOCK] pub tx fail\r\n");
+        return 0u;
+    }
+    if(!uart2_wait_text("SEND OK", ALIYUN_WAIT_MID_MS)) {
+        CLOUD_TRACE_MSG("[UNLOCK] pub SEND OK fail\r\n");
+        return 0u;
+    }
+    uart2_pump_rx_core(60u, 1u);
     if(s_ntp_synced == 0u) {
         (void)aliyun_ntp_try_parse_any();
     }
+    if(aliyun_property_post_result(500u) == 0u) {
+        CLOUD_TRACE_MSG("[UNLOCK] pub reject\r\n");
+        return 0u;
+    }
+    {
+        uint8_t dump[32];
+        uint16_t dump_len = 0u;
+        (void)uart2_recv_ipd_payload(dump, sizeof(dump), &dump_len, 80u);
+        (void)dump_len;
+    }
+    CLOUD_TRACE_MSG("[UNLOCK] pub ok\r\n");
     return 1u;
 #else
     (void)json_payload;
@@ -4899,20 +5229,34 @@ void cloud_aliyun_at_poll_5ms(void)
         snprintf(cmd, sizeof(cmd), "AT+CIPSNTPCFG=1,%d,\"ntp1.aliyun.com\",\"cn.ntp.org.cn\"\r\n",
                  APP_ALIYUN_SNTP_TZ_HOURS);
         if(uart2_send_text(cmd) && uart2_wait_text("OK", ALIYUN_SNTP_CMD_OK_MS)) {
+            s_sntp_time_updated_seen = 0u;
+            s_sntp_time_updated_ms = 0u;
+            s_sntp_query_start_ms = 0u;
             s_sntp_wait_until_ms = HAL_GetTick() + ALIYUN_SNTP_POSTCFG_DELAY_MS;
             s_sntp_try_cnt = 0u;
             s_sntp_empty_cnt = 0u;
             s_sntp_next_query_ms = s_sntp_wait_until_ms;
             s_sntp_deadline_ms = s_sntp_wait_until_ms + 15000u;
             s_step = ALIYUN_STEP_SNTP_WAIT;
-            TIME_TRACE_MSG("[TIME]Ecf\r\n");
+            TIME_TRACE_MSG("[TIME] ESP SNTP cfg ok\r\n");
         } else {
             TIME_TRACE_MSG("[TIME]EcX\r\n");
             cloud_aliyun_at_mqtt_kick_after_wifi();
         }
         break;
     case ALIYUN_STEP_SNTP_WAIT:
-        if((int32_t)(HAL_GetTick() - (int32_t)s_sntp_wait_until_ms) >= 0) {
+        (void)cloud_uart2_pump_rx(20u);
+        if(strstr(s_rx_win, "TIME_UPDATED") != NULL) {
+            s_sntp_time_updated_seen = 1u;
+            if(s_sntp_time_updated_ms == 0u) {
+                s_sntp_time_updated_ms = HAL_GetTick();
+            }
+        }
+        if(s_sntp_time_updated_seen != 0u &&
+           (int32_t)(HAL_GetTick() - (int32_t)s_sntp_wait_until_ms) >= 0) {
+            s_step = ALIYUN_STEP_SNTP_TIME;
+        } else if((int32_t)(HAL_GetTick() - (int32_t)s_sntp_deadline_ms) >= 0) {
+            TIME_TRACE_MSG("[TIME] SNTP wait timeout\r\n");
             s_step = ALIYUN_STEP_SNTP_TIME;
         }
         break;
@@ -4936,6 +5280,13 @@ void cloud_aliyun_at_poll_5ms(void)
         break;
 #endif
     case ALIYUN_STEP_CIPSTART:
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+        if(app_wall_clock_valid() == 0u && s_sntp_synced == 0u) {
+            TIME_TRACE_MSG("[TIME] ESP SNTP before MQTT\r\n");
+            s_step = ALIYUN_STEP_SNTP_CFG;
+            break;
+        }
+#endif
         if(app_wifi_policy_may_run_mqtt() == 0u) {
             s_step = ALIYUN_STEP_WIFI_IDLE;
             CLOUD_TRACE_MSG("[CLOUD] MQTT blocked no ip\r\n");
@@ -5101,12 +5452,19 @@ void cloud_aliyun_at_poll_5ms(void)
             CLOUD_TRACE_MSG("[CLOUD] MQTT online ok\r\n");
             s_ntp_connect_tried = 1u;
             s_ntp_sub_sess = 0u;
+            s_ntp_sub_ok = 0u;
             s_ntp_sync_running = 0u;
             s_ntp_next_request_ms = 0u;
+            s_ntp_await_until_ms = 0u;
+            s_ntp_mqtt_fail_cnt = 0u;
             if(s_sntp_synced != 0u || app_wall_clock_valid() != 0u) {
                 s_ntp_synced = 1u;
             }
-            cloud_ota_service_flush_unlock_pending();
+            s_mqtt_online_ms = HAL_GetTick();
+            s_unlock_flush_done = 0u;
+            s_unlock_flush_last_ms = 0u;
+            s_last_ping_ms = HAL_GetTick();
+            aliyun_unlock_flush_if_due(1u);
             app_link_guard_mqtt_end(1u);
             CLOUD_DBG("MQTT connected -> cloud online");
         } else {
@@ -5129,7 +5487,16 @@ void cloud_aliyun_at_poll_5ms(void)
         if(s_ntp_synced == 0u) {
             aliyun_ntp_try_sync_online();
         }
-        cloud_ota_service_flush_unlock_pending();
+        if(s_unlock_flush_done == 0u || app_unlock_flash_count() > 0u) {
+            aliyun_unlock_flush_if_due(0u);
+        }
+        if(s_ntp_synced == 0u && s_ntp_await_until_ms != 0u &&
+           (int32_t)(HAL_GetTick() - (int32_t)s_ntp_await_until_ms) < 0) {
+            break;
+        }
+        if((HAL_GetTick() - s_mqtt_online_ms) < 5000u) {
+            break;
+        }
         if((HAL_GetTick() - s_last_ping_ms) >= ALIYUN_KEEPALIVE_PING_MS) {
             s_last_ping_ms = HAL_GetTick();
             if(!aliyun_send_ping_and_check()) {

@@ -185,7 +185,6 @@ static void app_cloud_task(void *argument)
             }
             tcp_mqtt_init();
             s_cloud_boot_done = 1u;
-            usart_debug_tx_str("[RTOS] ESP/UART2 init done\r\n");
             vTaskDelay(pdMS_TO_TICKS(10u));
             continue;
         }
@@ -399,10 +398,6 @@ int main(void)
     delay_init(168);                    /* 初始化延时（W25Q 软 SPI 依赖 delay_us） */
     usart_init(115200);
     app_wifi_cfg_init_defaults();
-    usart_debug_tx_str("[FW]r110\r\n");
-#if (APP_TIME_TRACE != 0)
-    usart_debug_tx_str("[TIME]trace on\r\n");
-#endif
 #if (APP_CLOUD_UART_DEBUG != 0)
     usart_debug_tx_str("[FW] cloud debug ON -> [ALIYUN] on USART1 PA9 115200\r\n");
 #endif

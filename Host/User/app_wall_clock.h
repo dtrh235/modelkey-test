@@ -9,6 +9,9 @@ void app_home_wall_clock_refresh_ui(void);
 uint8_t app_wall_clock_valid(void);
 uint32_t app_wall_clock_epoch_sec(void);
 void app_wall_clock_on_set(int year, int month, int day, int hour, int min, int sec);
+/* 设置本地日历时刻并加 offset_sec 秒（用于 SNTP 查询滞后补偿） */
+void app_wall_clock_set_local(int year, int month, int day, int hour, int min, int sec,
+                              int offset_sec);
 uint8_t app_wall_clock_get_datetime(int *year, int *month, int *day, int *hour, int *min, int *sec);
 /* 当前墙钟时刻，Aliyun unlock_time 文本：YYYY.MM.DD HH:MM */
 uint8_t app_wall_clock_format_now(char *buf, size_t buf_sz);

@@ -89,6 +89,8 @@ static char s_pending_ssid[33];
 
 static uint8_t s_connecting_row = 0xFFu;
 
+#define WIFI_SCAN_LABEL_X        6
+#define WIFI_SCAN_LABEL_Y        78
 #define WIFI_SCAN_DOTS_GAP_PX    2
 #define WIFI_SCAN_DOTS_PERIOD_MS 400u
 
@@ -101,6 +103,14 @@ static uint32_t s_last_list_merge_ms = 0u;
 #define WIFI_LIST_MERGE_HOLD_MS 600u
 static uint32_t s_merge_hold_until_ms = 0u;
 static uint8_t s_gui_wake = 0u;
+
+static void screen_wifi_layout_scan_row(void);
+static void screen_wifi_scan_dots_apply_text(uint8_t n);
+static void screen_wifi_scan_dots_anim_reset(void);
+static void screen_wifi_scan_dots_anim_tick(void);
+static void screen_wifi_show_scanning(void);
+static void screen_wifi_show_connecting(void);
+static void screen_wifi_show_connect_result(uint8_t ok);
 
 static ui_nav_ctx_t build_nav_ctx(void)
 {
@@ -461,6 +471,9 @@ void screen_wifi_popup_confirm(void)
     app_wifi_cfg_set(s_pending_ssid, pwd_buf);
     WIFI_DBG("popup confirm ssid=%s pwd_len=%u", s_pending_ssid, (unsigned)strlen(pwd_buf));
     app_wifi_connect_start(s_pending_ssid, pwd_buf);
+    screen_wifi_show_connecting();
+    screen_wifi_scan_dots_anim_reset();
+    screen_wifi_gui_wake();
 #else
     screen_wifi_popup_close();
 #endif
@@ -1077,6 +1090,8 @@ static void screen_wifi_layout_scan_row(void)
        !lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
         return;
     }
+    /* 与 Guider 一致：主文案锚点在 (6,78)，省略号紧跟文字右侧 */
+    lv_obj_set_pos(guider_ui.screen_11_label_scan, WIFI_SCAN_LABEL_X, WIFI_SCAN_LABEL_Y);
     lv_obj_set_width(guider_ui.screen_11_label_scan, LV_SIZE_CONTENT);
     lv_obj_set_height(guider_ui.screen_11_label_scan, LV_SIZE_CONTENT);
     lv_obj_set_width(guider_ui.screen_11_label_scan_dots, LV_SIZE_CONTENT);
@@ -1092,6 +1107,7 @@ static void screen_wifi_scan_dots_anim_reset(void)
     s_scan_dots_last_ms = lv_tick_get();
     s_scan_dots_anim_on = 1u;
     screen_wifi_scan_dots_apply_text(0u);
+    screen_wifi_layout_scan_row();
 }
 
 static void screen_wifi_scan_dots_idle(void)
@@ -1124,6 +1140,7 @@ static void screen_wifi_scan_dots_anim_tick(void)
         s_scan_dots_count = 0u;
         screen_wifi_scan_dots_apply_text(0u);
     }
+    screen_wifi_layout_scan_row();
 }
 
 static uint8_t screen_wifi_hint_is_scanning(void)
@@ -1138,23 +1155,72 @@ static uint8_t screen_wifi_hint_is_scanning(void)
 #endif
 }
 
-static void screen_wifi_show_scanning(void)
+static const lv_font_t *screen_wifi_hint_font_for_text(uint32_t cp_a, uint32_t cp_b, uint32_t cp_c)
+{
+    lv_font_glyph_dsc_t gd;
+
+    if(lv_font_get_glyph_dsc(&lv_font_cn_wifi_25, &gd, cp_a, 0u) &&
+       lv_font_get_glyph_dsc(&lv_font_cn_wifi_25, &gd, cp_b, 0u) &&
+       lv_font_get_glyph_dsc(&lv_font_cn_wifi_25, &gd, cp_c, 0u)) {
+        return &lv_font_cn_wifi_25;
+    }
+    return &lv_font_SourceHanSerifSC_Regular_25;
+}
+
+static void screen_wifi_hint_prepare_row(const lv_font_t *hint_font)
 {
     if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
         lv_obj_clear_flag(guider_ui.screen_11_label_scan, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan, &lv_font_SourceHanSerifSC_Regular_25,
+        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan, hint_font,
                                    LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe6\x89\xab\xe6\x8f\x8f\xe4\xb8\xad");
         lv_obj_move_foreground(guider_ui.screen_11_label_scan);
     }
+    /* 省略号仅用 Guider 原字库（含 '.'），勿与主文案共用 cn_wifi_25 */
     if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
-        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan_dots, &lv_font_SourceHanSerifSC_Regular_25,
+        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan_dots,
+                                   &lv_font_SourceHanSerifSC_Regular_25,
                                    LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(guider_ui.screen_11_label_scan_dots);
-        screen_wifi_layout_scan_row();
     }
     screen_wifi_refresh_btn_raise();
+}
+
+static void screen_wifi_show_scanning(void)
+{
+    screen_wifi_hint_prepare_row(&lv_font_SourceHanSerifSC_Regular_25);
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe6\x89\xab\xe6\x8f\x8f\xe4\xb8\xad");
+    }
+    screen_wifi_layout_scan_row();
+}
+
+static void screen_wifi_show_connecting(void)
+{
+    const lv_font_t *font = screen_wifi_hint_font_for_text(0x6B63u, 0x5728u, 0x8FDEu);
+
+    screen_wifi_hint_prepare_row(font);
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe6\xad\xa3\xe5\x9c\xa8\xe8\xbf\x9e\xe6\x8e\xa5");
+    }
+    screen_wifi_layout_scan_row();
+}
+
+static void screen_wifi_show_connect_result(uint8_t ok)
+{
+    const lv_font_t *font = screen_wifi_hint_font_for_text(0x8FDEu, 0x63A5u,
+                                                           ok ? 0x6210u : 0x5931u);
+
+    s_scan_dots_anim_on = 0u;
+    screen_wifi_hint_prepare_row(font);
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_label_set_text(guider_ui.screen_11_label_scan,
+                          ok ? "\xe8\xbf\x9e\xe6\x8e\xa5\xe6\x88\x90\xe5\x8a\x9f" :
+                               "\xe8\xbf\x9e\xe6\x8e\xa5\xe5\xa4\xb1\xe8\xb4\xa5");
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
+        lv_label_set_text(guider_ui.screen_11_label_scan_dots, "");
+    }
 }
 
 static void screen_wifi_update_scan_hint(void)
@@ -1168,6 +1234,9 @@ static void screen_wifi_update_scan_hint(void)
         return;
     }
     if(g_app_scr != APP_SCR_11 || screen_wifi_popup_is_active()) {
+        return;
+    }
+    if(app_wifi_connect_busy() != 0u) {
         return;
     }
     scan_busy = app_wifi_scan_busy();
@@ -1400,29 +1469,21 @@ void screen_wifi_gui_wake(void)
 
 void screen_wifi_notify_sta_up(void)
 {
+    s_connecting_row = 0xFFu;
+    if(g_app_scr == APP_SCR_11) {
+        screen_wifi_show_connect_result(1u);
+    }
     screen_wifi_update_connected_bar();
     screen_wifi_gui_wake();
 }
 
 void screen_wifi_notify_connect_fail(void)
 {
-    s_scan_dots_anim_on = 0u;
     s_connecting_row = 0xFFu;
     if(g_app_scr != APP_SCR_11) {
         return;
     }
-    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
-        lv_obj_clear_flag(guider_ui.screen_11_label_scan, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_text_font(guider_ui.screen_11_label_scan, &lv_font_SourceHanSerifSC_Regular_25,
-                                   LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_label_set_text(guider_ui.screen_11_label_scan, "\xe8\xbf\x9e\xe6\x8e\xa5\xe5\xa4\xb1\xe8\xb4\xa5");
-        lv_obj_move_foreground(guider_ui.screen_11_label_scan);
-    }
-    if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
-        lv_label_set_text(guider_ui.screen_11_label_scan_dots, "");
-        lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
-    }
-    screen_wifi_refresh_btn_raise();
+    screen_wifi_show_connect_result(0u);
     screen_wifi_gui_wake();
 }
 
@@ -1470,13 +1531,23 @@ void screen_wifi_poll_tick(void)
     busy = app_wifi_scan_busy();
 
     if(!screen_wifi_popup_is_active()) {
-        uint8_t scan_ui = (uint8_t)(busy != 0u || app_wifi_scan_has_pending() != 0u || s_scan_dots_anim_on != 0u);
-        if(scan_ui != 0u) {
+        if(app_wifi_connect_busy() != 0u) {
             if(!s_scan_dots_anim_on) {
-                screen_wifi_show_scanning();
+                screen_wifi_show_connecting();
                 screen_wifi_scan_dots_anim_reset();
             } else {
                 screen_wifi_scan_dots_anim_tick();
+            }
+        } else {
+            uint8_t scan_ui = (uint8_t)(busy != 0u || app_wifi_scan_has_pending() != 0u ||
+                                        s_scan_dots_anim_on != 0u);
+            if(scan_ui != 0u) {
+                if(!s_scan_dots_anim_on) {
+                    screen_wifi_show_scanning();
+                    screen_wifi_scan_dots_anim_reset();
+                } else {
+                    screen_wifi_scan_dots_anim_tick();
+                }
             }
         }
     }

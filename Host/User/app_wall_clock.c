@@ -158,6 +158,24 @@ void app_wall_clock_on_set(int year, int month, int day, int hour, int min, int 
     }
 }
 
+void app_wall_clock_set_local(int year, int month, int day, int hour, int min, int sec,
+                              int offset_sec)
+{
+    uint32_t epoch;
+
+    if(year < 2020 || month < 1 || month > 12 || day < 1 || day > 31) {
+        return;
+    }
+    epoch = ymdhms_to_epoch(year, month, day, hour, min, sec);
+    if(offset_sec > 0) {
+        epoch += (uint32_t)offset_sec;
+    }
+    if(epoch_to_ymdhms(epoch, &year, &month, &day, &hour, &min, &sec) == 0u) {
+        return;
+    }
+    app_wall_clock_on_set(year, month, day, hour, min, sec);
+}
+
 uint8_t app_wall_clock_valid(void)
 {
     return s_wall.valid;
@@ -211,14 +229,30 @@ uint8_t app_wall_clock_format_unlock_event(char *buf, size_t buf_sz,
 
 uint8_t app_wall_clock_get_datetime(int *year, int *month, int *day, int *hour, int *min, int *sec)
 {
-    if(app_wall_clock_valid() == 0u) {
+    int y;
+    int mo;
+    int d;
+    int h;
+    int mi;
+    int s;
+
+    if(app_wall_clock_valid() == 0u || s_anchor_valid == 0u) {
         return 0u;
     }
-    if(year != NULL) *year = s_wall.year;
-    if(month != NULL) *month = s_wall.month;
-    if(day != NULL) *day = s_wall.day;
-    if(hour != NULL) *hour = s_wall.hour;
-    if(min != NULL) *min = s_wall.min;
-    if(sec != NULL) *sec = s_wall.sec;
+    if(epoch_to_ymdhms(wall_clock_now_epoch(), &y, &mo, &d, &h, &mi, &s) == 0u) {
+        return 0u;
+    }
+    s_wall.year = y;
+    s_wall.month = mo;
+    s_wall.day = d;
+    s_wall.hour = h;
+    s_wall.min = mi;
+    s_wall.sec = s;
+    if(year != NULL) *year = y;
+    if(month != NULL) *month = mo;
+    if(day != NULL) *day = d;
+    if(hour != NULL) *hour = h;
+    if(min != NULL) *min = mi;
+    if(sec != NULL) *sec = s;
     return 1u;
 }

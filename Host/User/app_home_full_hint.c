@@ -3,9 +3,8 @@
 #include "app_unlock_flash_queue.h"
 #include "app_state.h"
 #include "app_screen.h"
+#include "gui_guider.h"
 #include "lvgl.h"
-
-extern lv_font_t lv_font_cn_home_20;
 
 static lv_obj_t *s_lbl_full;
 

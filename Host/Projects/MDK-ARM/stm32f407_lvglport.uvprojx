@@ -311,7 +311,7 @@
           </ArmAdsMisc>
           <Cads>
             <interw>1</interw>
-            <Optim>2</Optim>
+            <Optim>4</Optim>
             <oTime>0</oTime>
             <SplitLS>0</SplitLS>
             <OneElfS>1</OneElfS>
@@ -1381,109 +1381,9 @@
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\fsdrv\lv_fs_win32.c</FilePath>
             </File>
             <File>
-              <FileName>gifdec.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\gif\gifdec.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_gif.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\gif\lv_gif.c</FilePath>
-            </File>
-            <File>
-              <FileName>lodepng.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\png\lodepng.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_png.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\png\lv_png.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_qrcode.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\qrcode\lv_qrcode.c</FilePath>
-            </File>
-            <File>
-              <FileName>qrcodegen.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\qrcode\qrcodegen.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_rlottie.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\rlottie\lv_rlottie.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_sjpg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\sjpg\lv_sjpg.c</FilePath>
-            </File>
-            <File>
-              <FileName>tjpgd.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\libs\sjpg\tjpgd.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_fragment.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\fragment\lv_fragment.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_fragment_manager.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\fragment\lv_fragment_manager.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_gridnav.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\gridnav\lv_gridnav.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_ime_pinyin.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\ime\lv_ime_pinyin.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_imgfont.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\imgfont\lv_imgfont.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_monkey.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\monkey\lv_monkey.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_msg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\msg\lv_msg.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_snapshot.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\others\snapshot\lv_snapshot.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_theme_basic.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\themes\basic\lv_theme_basic.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_theme_default.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\themes\default\lv_theme_default.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_theme_mono.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\themes\mono\lv_theme_mono.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_animimg.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\animimg\lv_animimg.c</FilePath>
             </File>
             <File>
               <FileName>lv_calendar.c</FileName>
@@ -1496,84 +1396,9 @@
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\calendar\lv_calendar_header_arrow.c</FilePath>
             </File>
             <File>
-              <FileName>lv_calendar_header_dropdown.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\calendar\lv_calendar_header_dropdown.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_chart.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\chart\lv_chart.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_colorwheel.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\colorwheel\lv_colorwheel.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_imgbtn.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\imgbtn\lv_imgbtn.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_keyboard.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\keyboard\lv_keyboard.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_led.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\led\lv_led.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_list.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\list\lv_list.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_menu.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\menu\lv_menu.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_meter.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\meter\lv_meter.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_msgbox.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\msgbox\lv_msgbox.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_span.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\span\lv_span.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_spinbox.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\spinbox\lv_spinbox.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_spinner.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\spinner\lv_spinner.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_tabview.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\tabview\lv_tabview.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_tileview.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\tileview\lv_tileview.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_win.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\extra\widgets\win\lv_win.c</FilePath>
             </File>
             <File>
               <FileName>lv_extra.c</FileName>
@@ -1591,11 +1416,6 @@
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font.c</FilePath>
             </File>
             <File>
-              <FileName>lv_font_dejavu_16_persian_hebrew.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_dejavu_16_persian_hebrew.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_font_fmt_txt.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_fmt_txt.c</FilePath>
@@ -1606,134 +1426,14 @@
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_loader.c</FilePath>
             </File>
             <File>
-              <FileName>lv_font_montserrat_8.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_8.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_10.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_10.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_12.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_12.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_12_subpx.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_12_subpx.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_font_montserrat_14.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_14.c</FilePath>
             </File>
             <File>
-              <FileName>lv_font_montserrat_16.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_16.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_18.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_18.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_20.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_20.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_22.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_22.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_24.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_24.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_26.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_26.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_28.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_28.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_28_compressed.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_28_compressed.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_30.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_30.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_32.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_32.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_34.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_34.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_36.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_36.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_38.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_38.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_40.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_40.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_42.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_42.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_44.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_44.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_46.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_46.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserrat_48.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_montserrat_48.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_font_simsun_16_cjk.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_simsun_16_cjk.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_unscii_8.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_unscii_8.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_unscii_16.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\font\lv_font_unscii_16.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -2016,11 +1716,6 @@
               <FilePath>..\..\guider\generated\images\_3_alpha_240x320.c</FilePath>
             </File>
             <File>
-              <FileName>lv_analogclock.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\lv_analogclock.c</FilePath>
-            </File>
-            <File>
               <FileName>setup_scr_screen_1.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\guider\generated\setup_scr_screen_1.c</FilePath>
@@ -2081,29 +1776,9 @@
               <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_18.c</FilePath>
             </File>
             <File>
-              <FileName>lv_font_montserratMedium_21.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_21.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_12.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_12.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_15.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_15.c</FilePath>
-            </File>
-            <File>
               <FileName>lv_font_SourceHanSerifSC_Regular_16.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_16.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_17.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_17.c</FilePath>
             </File>
             <File>
               <FileName>lv_font_SourceHanSerifSC_Regular_18.c</FileName>

@@ -229,10 +229,7 @@ LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_25)
 LV_FONT_DECLARE(lv_font_montserratMedium_12)
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_19)
 LV_FONT_DECLARE(lv_font_montserratMedium_16)
-LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_18)
-LV_FONT_DECLARE(lv_font_montserratMedium_17)
-LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_30)
-LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_26)
+LV_FONT_DECLARE(lv_font_cn_home_20)
 
 
 #ifdef __cplusplus

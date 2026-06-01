@@ -100,7 +100,6 @@ void app_cloud_session_poll(void)
         if(cloud_aliyun_at_is_online() != 0u) {
             s_st = SESS_ONLINE;
             s_offline_ms = 0u;
-            CLOUD_TRACE_MSG("[CLOUD] MQTT online, flush unlock backlog\r\n");
             CLOUD_DBG("session MQTT online persistent");
             cloud_ota_service_flush_unlock_pending();
             break;
@@ -126,9 +125,7 @@ void app_cloud_session_poll(void)
                app_unlock_flash_count() > 0u &&
                (s_last_upload_ms == 0u ||
                 (now - s_last_upload_ms) >= CLOUD_SESSION_UPLOAD_GAP_MS)) {
-                if(app_unlock_flash_upload_next(cloud_session_publish_cb, NULL) != 0u) {
-                    CLOUD_TRACE_MSG("[CLOUD] unlock backlog sent\r\n");
-                }
+                (void)app_unlock_flash_upload_next(cloud_session_publish_cb, NULL);
                 s_last_upload_ms = now;
             }
             break;
