@@ -559,10 +559,6 @@ static void app_touch_process_release(lv_coord_t x, lv_coord_t y)
             app_touch_key_once(KEY_ESC);
             return;
         }
-        if(guider_ui.screen_4_table_1 != NULL &&
-           app_touch_hit(guider_ui.screen_4_table_1, x, y)) {
-            screen4_touch_select_row(x, y);
-        }
         app_touch_reset_slot();
         return;
     }
@@ -686,6 +682,12 @@ void app_touch_ui_handle(void)
                 s_touch_move_total = (lv_coord_t)(s_touch_move_total + dx + dy);
                 if(s_touch_move_total >= (lv_coord_t)APP_TOUCH_LIST_SCROLL_THRESH) {
                     screen_wifi_list_scroll_by(cy - s_touch_last_y);
+                }
+            } else if(g_app_scr == APP_SCR_4 && lv_scr_act() == guider_ui.screen_4 &&
+                      screen4_point_in_list(cx, cy) != 0u) {
+                s_touch_move_total = (lv_coord_t)(s_touch_move_total + dx + dy);
+                if(s_touch_move_total >= (lv_coord_t)APP_TOUCH_LIST_SCROLL_THRESH) {
+                    screen4_list_scroll_by(cy - s_touch_last_y);
                 }
             }
             s_touch_last_x = cx;

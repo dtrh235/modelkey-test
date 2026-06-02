@@ -27,14 +27,10 @@ void screen1_cancel_unlock_popup(void)
     g_screen1_unlock_popup = NULL;
 }
 
-static void screen1_return_home_after_unlock(void)
+void screen1_clear_auth_inputs(void)
 {
-    if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
-        lv_obj_del(g_screen1_unlock_popup);
-        g_screen1_unlock_popup = NULL;
-    }
-#if APP_RS485_IS_SLAVE
-    /* 从机仅保留开锁页：关闭弹窗后清空输入，不跳转首页 */
+    screen1_cancel_unlock_popup();
+    screen1_hide_error_label();
     g_screen1_field_index = 0u;
     g_cursor_visible = 1u;
     ui_cursor_destroy(&g_screen1_cursor);
@@ -45,6 +41,16 @@ static void screen1_return_home_after_unlock(void)
         lv_textarea_set_text(guider_ui.screen_1_ta_2, "");
     }
     screen1_set_field_selected(0u);
+}
+
+static void screen1_return_home_after_unlock(void)
+{
+    if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
+        lv_obj_del(g_screen1_unlock_popup);
+        g_screen1_unlock_popup = NULL;
+    }
+#if APP_RS485_IS_SLAVE
+    screen1_clear_auth_inputs();
 #else
     ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.screen_1_del,
                           setup_scr_screen, LV_SCR_LOAD_ANIM_NONE, 0, 0, false, true);

@@ -27,8 +27,7 @@ static void hide_ok_esc_btn(lv_obj_t *btn, lv_obj_t *lbl)
 
 void app_slave_ui_hide_corner_ok_esc(void)
 {
-    hide_ok_esc_btn(guider_ui.screen_1_btn_2, guider_ui.screen_1_btn_2_label);
-    hide_ok_esc_btn(guider_ui.screen_1_btn_3, guider_ui.screen_1_btn_3_label);
+    /* screen_1 保留 OK/ESC，与主机开锁页触屏区域一致 */
     hide_ok_esc_btn(guider_ui.screen_2_btn_2, guider_ui.screen_2_btn_2_label);
     hide_ok_esc_btn(guider_ui.screen_2_btn_1, guider_ui.screen_2_btn_1_label);
     hide_ok_esc_btn(guider_ui.screen_3_btn_1, guider_ui.screen_3_btn_1_label);

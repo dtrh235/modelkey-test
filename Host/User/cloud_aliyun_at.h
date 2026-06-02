@@ -18,6 +18,8 @@ uint8_t cloud_aliyun_at_is_online(void);
 uint8_t cloud_aliyun_at_wifi_joined(void);
 uint8_t cloud_aliyun_at_sta_on_target_ssid(void);
 uint8_t cloud_aliyun_at_wifi_link_ready(void);
+/* 进 WiFi 页时校验 STA IP（防掉线后仍显示已连接） */
+void cloud_aliyun_at_request_wifi_ip_verify(void);
 void cloud_aliyun_at_request_target_wifi_join(void);
 /* 已连 STA 的 SSID（仅 wifi_joined 时有效） */
 uint8_t cloud_aliyun_at_get_connected_ssid(char *out, uint16_t out_sz);

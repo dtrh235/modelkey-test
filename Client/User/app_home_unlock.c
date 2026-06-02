@@ -33,6 +33,46 @@ extern uint8_t g_default_admin_has_nfc;
 extern uint8_t g_default_admin_nfc_uid[4];
 extern char g_default_admin_account[13];
 
+#if APP_RS485_IS_SLAVE
+static int app_nfc_match_user(const uint8_t uid[4], const char **acc_out)
+{
+    int idx;
+    uint8_t uid_rev[4];
+
+    if(acc_out != NULL) {
+        *acc_out = "";
+    }
+    idx = users_find_index_by_nfc_uid(uid);
+    if(idx >= 0) {
+        if(acc_out != NULL) {
+            *acc_out = g_users[idx].acc;
+        }
+        return idx;
+    }
+    uid_rev[0] = uid[3];
+    uid_rev[1] = uid[2];
+    uid_rev[2] = uid[1];
+    uid_rev[3] = uid[0];
+    idx = users_find_index_by_nfc_uid(uid_rev);
+    if(idx >= 0) {
+        if(acc_out != NULL) {
+            *acc_out = g_users[idx].acc;
+        }
+        return idx;
+    }
+    if(!g_default_admin_deleted && g_default_admin_has_nfc) {
+        if(memcmp(g_default_admin_nfc_uid, uid, 4) == 0 ||
+           memcmp(g_default_admin_nfc_uid, uid_rev, 4) == 0) {
+            if(acc_out != NULL) {
+                *acc_out = g_default_admin_account;
+            }
+            return -2;
+        }
+    }
+    return -1;
+}
+#endif
+
 static uint32_t s_home_nfc_last_poll_ms = 0u;
 #if APP_RS485_IS_SLAVE
 static uint32_t s_nfc_match_cooldown_until = 0u;
@@ -198,7 +238,7 @@ void app_home_nfc_poll_handle(void)
     const char *unlock_acc = "";
     int idx;
     uint8_t got_card;
-#if (APP_SLAVE_LOG_VERBOSE != 0)
+#if (APP_SLAVE_USART1_DEBUG != 0)
     static uint32_t s_last_alive_log = 0u;
 #endif
     static uint32_t s_last_health_check = 0u;
@@ -218,9 +258,7 @@ void app_home_nfc_poll_handle(void)
     if(!app_nfc_hw_ready()) {
         app_nfc_hw_init_once();
         if(!app_nfc_hw_ready()) {
-#if (APP_SLAVE_LOG_VERBOSE != 0)
-            APP_UNLOCK_LOG("nfc hw not ready, reset_ret=%u", app_nfc_last_reset_ret());
-#endif
+            APP_UNLOCK_LOG("hw not ready reset_ret=%u", (unsigned)app_nfc_last_reset_ret());
             return;
         }
     }
@@ -242,11 +280,13 @@ void app_home_nfc_poll_handle(void)
         }
     }
 
-#if (APP_SLAVE_LOG_VERBOSE != 0)
-    /* 每 3 秒打一次心跳，确认首页 NFC 轮询在跑 */
-    if((now - s_last_alive_log) >= 3000u) {
+#if (APP_SLAVE_USART1_DEBUG != 0)
+    if((now - s_last_alive_log) >= 5000u) {
         s_last_alive_log = now;
-        APP_UNLOCK_LOG("poll alive ready=%u", app_nfc_hw_ready());
+        APP_UNLOCK_LOG("poll alive ready=%u users=%u admin_nfc=%u",
+                       (unsigned)app_nfc_hw_ready(),
+                       (unsigned)g_user_count,
+                       (unsigned)g_default_admin_has_nfc);
     }
 #endif
 
@@ -309,6 +349,10 @@ void app_home_nfc_poll_handle(void)
         }
         s_nfc_hit = 0u;
 
+#if APP_RS485_IS_SLAVE
+        idx = app_nfc_match_user(uid, &unlock_acc);
+        matched = (idx != -1) ? 1u : 0u;
+#else
         idx = users_find_index_by_nfc_uid(uid);
         if(idx >= 0) {
             matched = 1u;
@@ -318,12 +362,20 @@ void app_home_nfc_poll_handle(void)
             matched = 1u;
             unlock_acc = g_default_admin_account;
         }
-#if (APP_SLAVE_LOG_VERBOSE != 0)
-        APP_UNLOCK_LOG("nfc uid confirmed match=%u acc=%s", matched, unlock_acc);
+#endif
+        APP_UNLOCK_LOG("uid=%02X%02X%02X%02X match=%u acc=%.12s",
+                       uid[0], uid[1], uid[2], uid[3],
+                       (unsigned)matched, unlock_acc);
+#if APP_RS485_IS_SLAVE
+        if(matched == 0u) {
+            APP_UNLOCK_LOG("no_match stored_admin=%02X%02X%02X%02X (sync users via RS485 host)",
+                           g_default_admin_nfc_uid[0], g_default_admin_nfc_uid[1],
+                           g_default_admin_nfc_uid[2], g_default_admin_nfc_uid[3]);
+        }
 #endif
         if(matched) {
 #if APP_RS485_IS_SLAVE
-            APP_UNLOCK_LOG("unlock nfc acc=%s", unlock_acc);
+            APP_UNLOCK_LOG("unlock OK method=nfc acc=%s", unlock_acc);
             app_home_unlock_arm_match_cooldown();
             app_unlock_event_handle_success(APP_UNLOCK_POPUP_SCREEN1, unlock_acc, "nfc");
 #else

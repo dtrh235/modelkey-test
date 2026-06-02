@@ -37,21 +37,14 @@
 
 extern uint32_t HAL_GetTick(void);
 
-void app_key_ui_handle(void)
-{
-    KeyValue_t key = KEY_Scan_WithDebounce(20);
-    if(key == KEY_NONE) return;
-
 #if APP_RS485_IS_SLAVE
-    if(g_app_scr != APP_SCR_1) {
-        return;
-    }
+static void app_key_ui_screen1(KeyValue_t key)
+{
     if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
         return;
     }
     if(key == KEY_ESC) {
-        screen1_cancel_unlock_popup();
-        screen1_hide_error_label();
+        screen1_clear_auth_inputs();
         return;
     }
     if(key == KEY_OK) {
@@ -70,8 +63,37 @@ void app_key_ui_handle(void)
     } else {
         screen1_handle_input_key(key);
     }
+}
+
+void app_key_ui_dispatch(KeyValue_t key)
+{
+    if(key == KEY_NONE) {
+        return;
+    }
+    if(g_app_scr != APP_SCR_1) {
+        return;
+    }
+    app_key_ui_screen1(key);
+}
+
+void app_key_ui_handle(void)
+{
+    KeyValue_t key = KEY_Scan_WithDebounce(20);
+    app_key_ui_dispatch(key);
     return;
-#endif
+}
+#else
+void app_key_ui_dispatch(KeyValue_t key)
+{
+    (void)key;
+}
+
+void app_key_ui_handle(void)
+{
+    KeyValue_t key = KEY_Scan_WithDebounce(20);
+    if(key == KEY_NONE) {
+        return;
+    }
 
     if(g_app_scr == APP_SCR_HOME) {
         if(key == KEY_RIGHT) {
@@ -500,3 +522,4 @@ void app_key_ui_handle(void)
         screen4_handle_table_key(key);
     }
 }
+#endif /* !APP_RS485_IS_SLAVE */

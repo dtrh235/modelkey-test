@@ -12,6 +12,8 @@
 #include "app_slave_diag.h"
 #include "app_slave_fp_sync.h"
 #include "app_fp_mirror_diag.h"
+#include "app_slave_host_time.h"
+#include "app_slave_unlock_queue.h"
 #endif
 
 #if APP_RS485_IS_MASTER
@@ -66,6 +68,8 @@ void app_rs485_slave_flush_pending_notify(void)
     uint8_t try_n;
     bool ok = false;
 
+    app_slave_unlock_queue_flush_rs485();
+
     if(s_unlock_notify_pending == 0u && s_fp_commit_pending == 0u) {
         return;
     }
@@ -83,9 +87,12 @@ void app_rs485_slave_flush_pending_notify(void)
         }
         s_unlock_notify_pending = 0u;
 #if (APP_SLAVE_USART1_DEBUG != 0)
-        if(!ok) {
-            SLAVE_DBG_LOG("[SLV] unlock_notify FAIL acc=%s mid=%u", s_unlock_notify_acc,
-                          (unsigned)s_unlock_notify_mid);
+        if(ok) {
+            SLAVE_DBG_LOG("[SLV][RS485] unlock_notify OK acc=%s mid=%u",
+                          s_unlock_notify_acc, (unsigned)s_unlock_notify_mid);
+        } else {
+            SLAVE_DBG_LOG("[SLV][RS485] unlock_notify FAIL acc=%s mid=%u",
+                          s_unlock_notify_acc, (unsigned)s_unlock_notify_mid);
         }
 #endif
     }
@@ -613,20 +620,21 @@ void app_rs485_slave_server_poll(uint32_t read_tout_ms)
 
     n = app_rs485_recv_frame(rxb, (uint16_t)sizeof(rxb), listen_ms);
     if(n == 0u) {
-#if (APP_SLAVE_USART1_DEBUG != 0) && (APP_SLAVE_LOG_VERBOSE != 0)
+#if (APP_SLAVE_USART1_DEBUG != 0)
         {
             static uint32_t s_slv_rs485_idle_log_ms;
             uint32_t tnow = HAL_GetTick();
             if((tnow - s_slv_rs485_idle_log_ms) >= 20000u) {
                 s_slv_rs485_idle_log_ms = tnow;
-                SLAVE_DBG_LOG("[SLV][RS485] listen idle link_ready=%u (wait host frame)",
-                              (unsigned)app_rs485_link_ready());
+                SLAVE_DBG_LOG("[SLV][RS485] idle link=%u host_seen=%u (no frame)",
+                              (unsigned)app_rs485_link_ready(),
+                              (unsigned)app_slave_host_time_host_seen());
             }
         }
 #endif
         return;
     }
-#if (APP_SLAVE_USART1_DEBUG != 0) && (APP_SLAVE_LOG_VERBOSE != 0)
+#if (APP_SLAVE_USART1_DEBUG != 0)
     SLAVE_DBG_LOG("[SLV][RS485] rx n=%u dst=%02X src=%02X cmd=0x%02X",
                   (unsigned)n, rxb[2], rxb[3], (unsigned)rxb[5]);
 #endif
@@ -647,6 +655,7 @@ void app_rs485_slave_server_poll(uint32_t read_tout_ms)
 
     err = 0u;
     okb = true;
+    app_slave_host_time_on_host_frame();
 
     if((cmd & 0x80u) != 0u) {
 #if APP_RS485_IS_SLAVE

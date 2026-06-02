@@ -43,14 +43,12 @@
 
 /* Feature / boot flags */
 #define APP_NFC_ENABLE          1
-#ifndef APP_TEMP_DISABLE_BIOMETRIC
 #define APP_TEMP_DISABLE_BIOMETRIC 0
-#endif
 #define APP_BOOT_VTOR_RELOCATE  0
 #define APP_USE_FREERTOS        1
 
 /* RS485: USART6 PC6(TX→DI) / PC7(RX←RO) / PC8(DE+RE)。与调试口独立，默认关闭。 */
-#define APP_RS485_ENABLE         0
+#define APP_RS485_ENABLE         1
 /* 1=调试口 USART6 PC6(TX)/PC7(RX)；0=USART1 PA9/PA10 */
 #ifndef APP_DEBUG_ON_USART6
 #define APP_DEBUG_ON_USART6      0

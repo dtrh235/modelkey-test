@@ -1,7 +1,7 @@
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
-/* NFC + RS485 硬件测试工程：仅保留录入测试所需宏 */
+/* NFC + RS485 纭敓鏂ゆ嫹閿熸枻鎷烽敓鐨嗙櫢鎷烽敓鏁欙綇鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹褰曢敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹閿熸枻鎷烽敓鏂ゆ嫹 */
 
 #define APP_RS485_ENABLE           1
 #define APP_DEBUG_ON_USART6        0
@@ -19,5 +19,6 @@
 #define APP_CLOUD_ENABLE           0
 #define APP_ALIYUN_AT_ENABLE       0
 #define APP_HOST_RS485_DIAG        0
+#define APP_W25Q_DEBUG             0
 
 #endif /* APP_CONFIG_H */

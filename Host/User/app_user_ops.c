@@ -1183,6 +1183,50 @@ uint8_t users_admin_count(void)
     return n;
 }
 
+uint8_t users_has_loginable_admin(void)
+{
+    uint8_t i;
+
+    if(g_default_admin_deleted == 0u &&
+       g_default_admin_account[0] != '\0' &&
+       g_default_admin_is_admin_role != 0u) {
+        return 1u;
+    }
+    for(i = 0u; i < g_user_count; i++) {
+        if(g_users[i].active != 0u && g_users[i].is_admin != 0u) {
+            return 1u;
+        }
+    }
+    return 0u;
+}
+
+void users_ensure_default_admin_if_none(void)
+{
+    int idx;
+
+    if(users_has_loginable_admin() != 0u) {
+        return;
+    }
+
+    idx = users_find_index_by_acc(ADMIN_DEFAULT_ACCOUNT);
+    if(idx >= 0) {
+        g_users[idx].active = 1u;
+        g_users[idx].is_admin = 1u;
+        if(g_users[idx].pwd[0] == '\0') {
+            strncpy(g_users[idx].pwd, ADMIN_DEFAULT_PASSWORD, sizeof(g_users[idx].pwd) - 1u);
+            g_users[idx].pwd[sizeof(g_users[idx].pwd) - 1u] = '\0';
+        }
+        (void)users_storage_save();
+        return;
+    }
+
+    g_default_admin_deleted = 1u;
+    g_default_admin_is_admin_role = 0u;
+    g_default_admin_account[0] = '\0';
+    g_default_admin_password[0] = '\0';
+    (void)users_try_register(ADMIN_DEFAULT_ACCOUNT, ADMIN_DEFAULT_PASSWORD, true);
+}
+
 uint8_t users_migrate_default_admin_to_users(void)
 {
     int idx;
@@ -1232,7 +1276,43 @@ uint8_t users_migrate_default_admin_to_users(void)
 
 bool users_try_delete_by_acc(const char *acc)
 {
-    int idx = users_find_index_by_acc(acc);
+    int idx;
+
+    if(acc == NULL || acc[0] == '\0') {
+        cloud_ota_service_report_event(CLOUD_EVT_USER_DELETE_FAIL, acc);
+        return false;
+    }
+
+    /* 旧 Flash：默认管理员仅存虚拟槽，未迁入 users[] */
+    if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
+        if(g_default_admin_is_admin_role != 0u && users_admin_count() <= 1u) {
+            cloud_ota_service_report_event(CLOUD_EVT_USER_DELETE_FAIL, acc);
+            return false;
+        }
+        users_clear_fp_by_acc(acc, 1u);
+        users_clear_nfc_by_acc(acc);
+        g_default_admin_deleted = 1u;
+        g_default_admin_is_admin_role = 0u;
+        g_default_admin_has_nfc = 0u;
+        memset(g_default_admin_nfc_uid, 0, sizeof(g_default_admin_nfc_uid));
+        g_default_admin_has_fp = 0u;
+        g_default_admin_fp_page_id_1 = 0xFFFFu;
+        g_default_admin_fp_page_id_2 = 0xFFFFu;
+        g_default_admin_account[0] = '\0';
+        g_default_admin_password[0] = '\0';
+        idx = users_find_index_by_acc(acc);
+        if(idx >= 0) {
+            g_users[idx].active = 0u;
+        }
+        (void)users_storage_save();
+#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
+        users_mirror_schedule_delete(acc);
+#endif
+        cloud_ota_service_report_event(CLOUD_EVT_USER_DELETE_OK, acc);
+        return true;
+    }
+
+    idx = users_find_index_by_acc(acc);
     if(idx < 0) {
         cloud_ota_service_report_event(CLOUD_EVT_USER_DELETE_FAIL, acc);
         return false;
@@ -1271,27 +1351,48 @@ bool default_admin_deleted(void)
 
 bool admin_credentials_match_with_delete(const char *acc, const char *pwd)
 {
-    if(default_admin_deleted() && strcmp(acc, g_default_admin_account) == 0) {
-        int idx = users_find_index_by_acc(acc);
-        if(idx < 0) {
-            return false;
-        }
-        if(!g_users[idx].is_admin) {
-            return false;
-        }
-        return strcmp(pwd, g_users[idx].pwd) == 0;
+    int idx;
+
+    if(acc == NULL || pwd == NULL || acc[0] == '\0') {
+        return false;
     }
-    return admin_credentials_match(acc, pwd);
+
+    idx = users_find_index_by_acc(acc);
+    if(idx >= 0 && g_users[idx].is_admin != 0u &&
+       strcmp(pwd, g_users[idx].pwd) == 0) {
+        return true;
+    }
+
+    if(!g_default_admin_deleted &&
+       g_default_admin_account[0] != '\0' &&
+       g_default_admin_is_admin_role != 0u &&
+       strcmp(acc, g_default_admin_account) == 0 &&
+       strcmp(pwd, g_default_admin_password) == 0) {
+        return true;
+    }
+
+    return false;
 }
 
 bool unlock_credentials_match_with_delete(const char *acc, const char *pwd)
 {
-    if(default_admin_deleted() && strcmp(acc, g_default_admin_account) == 0) {
-        int idx = users_find_index_by_acc(acc);
-        if(idx < 0) {
-            return false;
-        }
-        return strcmp(pwd, g_users[idx].pwd) == 0;
+    int idx;
+
+    if(acc == NULL || pwd == NULL || acc[0] == '\0') {
+        return false;
     }
-    return unlock_credentials_match(acc, pwd);
+
+    idx = users_find_index_by_acc(acc);
+    if(idx >= 0 && strcmp(pwd, g_users[idx].pwd) == 0) {
+        return true;
+    }
+
+    if(!g_default_admin_deleted &&
+       g_default_admin_account[0] != '\0' &&
+       strcmp(acc, g_default_admin_account) == 0 &&
+       strcmp(pwd, g_default_admin_password) == 0) {
+        return true;
+    }
+
+    return false;
 }

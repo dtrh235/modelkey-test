@@ -471,6 +471,21 @@
               <FilePath>..\..\User\app_key_ui.c</FilePath>
             </File>
             <File>
+              <FileName>app_touch_ui.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_touch_ui.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_slave_host_time.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_slave_host_time.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_slave_unlock_queue.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_slave_unlock_queue.c</FilePath>
+            </File>
+            <File>
               <FileName>app_state.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_state.c</FilePath>

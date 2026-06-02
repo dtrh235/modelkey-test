@@ -93,21 +93,7 @@ static void app_gui_task(void *argument)
             g_screen3_need_init = 0u;
         }
         if(g_screen4_need_init && g_app_scr == APP_SCR_4) {
-            lv_obj_t *table = guider_ui.screen_4_table_1;
-            if(lv_obj_is_valid(table)) {
-                lv_obj_add_state(table, LV_STATE_FOCUSED);
-                lv_obj_add_state(table, LV_STATE_FOCUS_KEY);
-
-                {
-                    uint16_t r_sel = 0u;
-                    uint16_t c_sel = 0u;
-                    lv_table_get_selected_cell(table, &r_sel, &c_sel);
-                    if(r_sel == LV_TABLE_CELL_NONE || c_sel == LV_TABLE_CELL_NONE) {
-                        int32_t k = LV_KEY_DOWN;
-                        lv_event_send(table, LV_EVENT_KEY, &k);
-                    }
-                }
-            }
+            screen4_refresh_table();
             g_screen4_need_init = 0u;
         }
         if(g_screen5_need_init && g_app_scr == APP_SCR_5) {
@@ -148,10 +134,8 @@ static void app_gui_task(void *argument)
             if(screen_wifi_popup_is_active()) {
                 screen_wifi_cursor_blink_handle();
             }
-            if(screen_wifi_gui_work_pending() != 0u) {
-                screen_wifi_poll_tick();
-            }
-            /* WiFi 页触屏/选中/弹窗依赖 LVGL 刷新；空闲时也不能停 timer */
+            /* 须每帧 poll：断网后 scan_busy/pending 均为 0 时仍要点「刷新」合并列表 */
+            screen_wifi_poll_tick();
             lv_timer_handler();
         } else {
             screen_wifi_cursor_blink_handle();
@@ -208,7 +192,8 @@ static void app_cloud_task(void *argument)
                 cloud_aliyun_at_wifi_link_ready() != 0u ||
                 app_link_guard_active() != 0u ||
                 cloud_aliyun_at_wifi_bringup_active() != 0u);
-            uint8_t need_cloud = (uint8_t)(uart_work != 0u || conn_busy != 0u || mqtt_work != 0u);
+            uint8_t need_cloud = (uint8_t)(uart_work != 0u || conn_busy != 0u || mqtt_work != 0u ||
+                                           g_wifi_scan_pending != 0u);
 
             if(need_cloud != 0u) {
                 if(conn_busy != 0u || app_link_guard_mqtt() != 0u) {
@@ -220,7 +205,7 @@ static void app_cloud_task(void *argument)
                 if(conn_busy != 0u) {
                     (void)app_wifi_connect_poll();
                 }
-                if(uart_work != 0u) {
+                if(uart_work != 0u || g_wifi_scan_pending != 0u) {
                     app_wifi_scan_cloud_tick();
                 }
                 cloud_ota_service_poll_5ms();
@@ -415,19 +400,20 @@ int main(void)
     app_rs485_link_init();
 #endif
     /* 外部 Flash 尽早访问：PA15/PB3/PB4 与 JTAG 复用，须在其它模块占 GPIO 前完成 */
+    /* 先读 Flash；仅在「读失败」或「没有任何可登录管理员」时补写出厂 1/1111，不清空已有账号 */
     if(!users_storage_load()) {
-        g_default_admin_deleted = 1u;
-        g_default_admin_is_admin_role = 0u;
-        g_default_admin_account[0] = '\0';
-        g_default_admin_password[0] = '\0';
-        (void)users_try_register("1", "1111", true);
-        (void)users_try_register("2", "2222", false);
+        users_ensure_default_admin_if_none();
         (void)users_storage_save();
-    } else if(users_migrate_default_admin_to_users() != 0u) {
-        (void)users_storage_save();
+    } else {
+        if(users_migrate_default_admin_to_users() != 0u) {
+            (void)users_storage_save();
+        }
+        users_ensure_default_admin_if_none();
     }
 
+#if (APP_TEMP_DISABLE_BIOMETRIC == 0)
     app_fp_hw_boot_diag(&g_fp_hw_inited);
+#endif
 //    led_init();                         /* 初始化LED */
     KEY_Init();                         /* 初始化按键 */
 //    sram_init();

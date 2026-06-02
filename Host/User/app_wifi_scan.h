@@ -82,6 +82,8 @@ void app_wifi_scan_drop_for_connect(void);
 /* 扫描/UI 结束后释放 UART2（清 async/ui_busy/尾包），便于下次扫描或连接 */
 void app_wifi_scan_release_uart2(void);
 
+/* STA 掉线：停扫/停连，清 UART2 占用（不改变 g_wifi_exclusive） */
+void app_wifi_scan_on_sta_link_down(void);
 void app_wifi_connect_reset(void);
 uint8_t app_wifi_connect_busy(void);
 /* GuiTask：CWJAP 已失败时立刻释放 connect_busy / link guard，恢复扫描 */

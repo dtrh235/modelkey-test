@@ -7,11 +7,12 @@
 #include "app_wifi_cfg.h"
 #include "app_wifi_policy.h"
 #include "app_wifi_scan.h"
+#include "app_wifi_remember.h"
 #include "app_link_guard.h"
 #include "cloud_ota_service.h"
 #include "app_unlock_flash_queue.h"
-
-uint8_t app_cloud_session_busy(void);
+#include "app_screen_wifi_flow.h"
+#include "app_cloud_session.h"
 #include "app_wifi_diag.h"
 #include "app_screen.h"
 #if (APP_HOST_SILENCE_ALIYUN_TERMINAL == 1)
@@ -256,6 +257,7 @@ static uint8_t s_cipsend_retry_cnt = 0u;
 static uint8_t s_scr11_mqtt_paused = 0u;
 static aliyun_step_t s_scr11_resume_step = ALIYUN_STEP_IDLE;
 static uint8_t s_wifi_sta_ip_ok = 0u;
+static uint8_t s_wifi_ip_verify_pending = 0u;
 static uint8_t s_wifi_ever_up = 0u;
 static volatile uint8_t s_user_wifi_join_st = 0u; /* 0 idle 1 pending 2 ok 3 fail */
 static volatile uint8_t s_wifi_join_fail_latch = 0u;
@@ -273,6 +275,8 @@ static uint8_t s_cwjap_try_channel = 0u;
 static uint8_t s_cloud_scan_kick_done = 0u;
 static uint8_t s_cifsr_retry_cnt = 0u;
 static uint32_t s_cifsr_last_try_ms = 0u;
+static uint32_t s_wifi_got_ip_ms = 0u;
+#define WIFI_DISCONNECT_GRACE_MS  10000u
 #define CIFSR_RETRY_MAX       20u
 #define CIFSR_RETRY_DELAY_MS  400u
 #define CWJAP_GOT_IP_WAIT_MS    5000u
@@ -1297,6 +1301,8 @@ static int cwjap_send_cmd_wait(const char *cmd, uint32_t timeout_ms)
     return 0;
 }
 
+static void cloud_aliyun_at_wifi_link_lost(const char *reason);
+
 static int uart2_wait_wifi_sta_connected(uint32_t timeout_ms)
 {
     uint8_t ch = 0u;
@@ -1337,6 +1343,7 @@ static int uart2_wait_wifi_sta_connected(uint32_t timeout_ms)
        strstr(s_rx_win, "WIFI GOT IP") == NULL &&
        strstr(s_rx_win, "WIFI CONNECTED") == NULL) {
         printf("[ALIYUN] CWJAP wait disconnect rx=%s\r\n", s_rx_win);
+        cloud_aliyun_at_wifi_link_lost("WIFI DISCONNECT during CWJAP");
         return -1;
     }
     printf("[ALIYUN] CWJAP wait timeout %lums (no GOT IP) rx=%s\r\n",
@@ -2734,15 +2741,23 @@ static void cloud_uart2_copy_cwjap_ssid(char *out, uint16_t out_sz)
 
 uint8_t cloud_aliyun_at_get_connected_ssid(char *out, uint16_t out_sz)
 {
+    const char *cfg;
+
     if(out == NULL || out_sz < 2u) {
         return 0u;
     }
     out[0] = '\0';
-    if(cloud_aliyun_at_wifi_joined() == 0u) {
+    if(cloud_aliyun_at_wifi_link_ready() == 0u) {
         return 0u;
     }
     if(s_connected_sta_ssid[0] != '\0') {
         strncpy(out, s_connected_sta_ssid, (size_t)(out_sz - 1u));
+        out[out_sz - 1u] = '\0';
+        return 1u;
+    }
+    cfg = app_wifi_cfg_get_ssid();
+    if(cfg != NULL && cfg[0] != '\0') {
+        strncpy(out, cfg, (size_t)(out_sz - 1u));
         out[out_sz - 1u] = '\0';
         return 1u;
     }
@@ -2799,6 +2814,15 @@ uint8_t cloud_uart2_try_modem_ready(void)
     return 0u;
 }
 
+void cloud_aliyun_at_request_wifi_ip_verify(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    s_wifi_ip_verify_pending = 1u;
+#else
+    (void)0;
+#endif
+}
+
 void cloud_aliyun_at_scr11_enter(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1) && (APP_WIFI_UI_SCAN_ENABLE == 1)
@@ -2809,10 +2833,16 @@ void cloud_aliyun_at_scr11_enter(void)
     }
     /* 已连 WiFi 时进 WiFi 页仅配置，勿 CIPCLOSE 打断 MQTT */
     if(cloud_aliyun_at_wifi_link_ready() != 0u) {
+        s_wifi_ip_verify_pending = 1u;
         s_scr11_mqtt_paused = 0u;
         return;
     }
+    /* STA 已掉线：清 scr11 暂停 MQTT 残留，避免无法扫描 */
     if(s_scr11_mqtt_paused != 0u) {
+        s_scr11_mqtt_paused = 0u;
+        s_scr11_resume_step = ALIYUN_STEP_IDLE;
+        s_step = ALIYUN_STEP_WIFI_IDLE;
+        s_step_ms = HAL_GetTick();
         return;
     }
     if(s_step >= ALIYUN_STEP_CIPSTART) {
@@ -2823,9 +2853,10 @@ void cloud_aliyun_at_scr11_enter(void)
         (void)uart2_wait_text("OK", 400u);
         cloud_uart2_hw_drain_ms(40u);
         cloud_uart2_rx_clear();
-        s_step = ALIYUN_STEP_CIFSR;
-        s_step_ms = HAL_GetTick();
+        /* 勿切到 CIFSR：scr11 未联网时 poll 会占 UART，CWLAP 一直 DEFERRED */
         s_scr11_mqtt_paused = 1u;
+        s_step = ALIYUN_STEP_WIFI_IDLE;
+        s_step_ms = HAL_GetTick();
     }
 #else
     (void)0;
@@ -4182,6 +4213,168 @@ void cloud_aliyun_at_wifi_join_diag_printf(void)
 #endif
 
 #if (APP_ALIYUN_AT_ENABLE == 1)
+
+static void cloud_aliyun_at_wifi_join_fail_finalize(void);
+
+static void cloud_aliyun_at_wifi_link_lost(const char *reason)
+{
+    uint8_t was_up;
+    uint8_t joining;
+    uint8_t need_teardown;
+
+    was_up = s_wifi_sta_ip_ok;
+    joining = (uint8_t)(s_user_wifi_join_st == 1u);
+    need_teardown = (uint8_t)(
+        was_up != 0u || joining != 0u || s_step == ALIYUN_STEP_ONLINE ||
+        s_step >= ALIYUN_STEP_CIPSTART || s_scr11_mqtt_paused != 0u ||
+        s_connected_sta_ssid[0] != '\0' || cloud_aliyun_at_is_online() != 0u);
+
+    /* 无论是否重复 URC，先清 STA/云端同步标志，避免 scr11 误显「已连接」 */
+    s_wifi_sta_ip_ok = 0u;
+    s_wifi_ip_verify_pending = 0u;
+    s_wifi_got_ip_ms = 0u;
+    s_connected_sta_ssid[0] = '\0';
+    s_scr11_mqtt_paused = 0u;
+    s_scr11_resume_step = ALIYUN_STEP_IDLE;
+    s_cloud_scan_kick_done = 0u;
+    s_ntp_await_until_ms = 0u;
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+    s_sntp_synced = 0u;
+    s_http_date_tried = 0u;
+#endif
+    s_ntp_synced = 0u;
+    s_ntp_mqtt_fail_cnt = 0u;
+    s_ntp_next_request_ms = 0u;
+    s_mqtt_online_ms = 0u;
+    s_last_ping_ms = HAL_GetTick();
+    s_mqtt_fast_join = 0u;
+    s_cipstart_next_ms = 0u;
+    s_cipsend_retry_cnt = 0u;
+    s_ping_fail_streak = 0u;
+    s_cifsr_retry_cnt = 0u;
+    app_wifi_cfg_clear_reconnect_request();
+    cloud_aliyun_at_invalidate_unlock_flush();
+    app_wifi_remember_on_wifi_down();
+    app_wifi_scan_on_sta_link_down();
+
+    if(need_teardown == 0u) {
+        screen_wifi_notify_sta_down();
+        app_link_guard_wifi_end(0u);
+        app_link_guard_mqtt_end(0u);
+        app_cloud_session_wifi_down();
+        return;
+    }
+
+    CWJAP_TRACE_MSG("[WiFi] STA link lost\r\n");
+    if(reason != NULL && reason[0] != '\0') {
+        CLOUD_TRACE_MSG("[CLOUD] wifi down\r\n");
+        printf("[ALIYUN] WiFi link lost: %s step=%s\r\n", reason, aliyun_step_name(s_step));
+    }
+
+    if(s_step >= ALIYUN_STEP_CIPSTART) {
+        aliyun_mqtt_close_link0();
+        (void)uart2_send_text("AT+CIPCLOSE=1\r\n");
+        (void)uart2_wait_text("OK", 200u);
+        cloud_uart2_hw_drain_ms(40u);
+    }
+    s_step = ALIYUN_STEP_WIFI_IDLE;
+    s_step_ms = HAL_GetTick();
+
+    if(joining != 0u) {
+        cloud_aliyun_at_wifi_join_fail_finalize();
+        screen_wifi_notify_connect_fail();
+    } else {
+        if(s_user_wifi_join_st != 0u) {
+            s_user_wifi_join_st = 0u;
+            s_wifi_join_fail_latch = 0u;
+        }
+        screen_wifi_notify_sta_down();
+    }
+
+    app_link_guard_wifi_end(0u);
+    app_link_guard_mqtt_end(0u);
+    app_cloud_session_wifi_down();
+    app_wifi_connect_reset();
+    cloud_uart2_rx_clear();
+}
+
+static uint8_t cloud_aliyun_at_wifi_disconnect_urc_valid(void)
+{
+    const char *disc;
+    const char *got_ip;
+    const char *cwlap;
+
+    if(cloud_uart2_rx_has("WIFI DISCONNECT") == 0) {
+        return 0u;
+    }
+    if(s_user_wifi_join_st == 1u || s_step == ALIYUN_STEP_CWJAP_SET) {
+        return 0u;
+    }
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+    if(cloud_aliyun_sntp_step_active() != 0u) {
+        return 0u;
+    }
+#endif
+    got_ip = strstr(s_rx_win, "WIFI GOT IP");
+    disc = strstr(s_rx_win, "WIFI DISCONNECT");
+    if(got_ip != NULL && disc != NULL && got_ip < disc) {
+        return 0u;
+    }
+    if(s_wifi_sta_ip_ok != 0u && s_wifi_got_ip_ms != 0u &&
+       (HAL_GetTick() - s_wifi_got_ip_ms) < WIFI_DISCONNECT_GRACE_MS) {
+        return 0u;
+    }
+    /* CWLAP 残留里的 DISCONNECT 字样不是真实掉线 */
+    cwlap = strstr(s_rx_win, "+CWLAP");
+    if(cwlap != NULL && disc != NULL && cwlap < disc) {
+        return 0u;
+    }
+    return 1u;
+}
+
+static void cloud_aliyun_at_poll_wifi_urc(void)
+{
+    if(s_user_wifi_join_st == 1u || s_step == ALIYUN_STEP_CWJAP_SET) {
+        return;
+    }
+    uart2_pump_rx_core(20u, 1u);
+    if(cloud_uart2_rx_has("WIFI GOT IP") != 0) {
+        return;
+    }
+    if(cloud_aliyun_at_wifi_disconnect_urc_valid() == 0u) {
+        return;
+    }
+    cloud_aliyun_at_wifi_link_lost("WIFI DISCONNECT URC");
+}
+
+static void cloud_aliyun_at_poll_wifi_ip_verify(void)
+{
+    extern volatile app_scr_t g_app_scr;
+
+    if(s_wifi_ip_verify_pending == 0u) {
+        return;
+    }
+    if(g_app_scr != APP_SCR_11) {
+        s_wifi_ip_verify_pending = 0u;
+        return;
+    }
+    if(s_user_wifi_join_st == 1u || s_step == ALIYUN_STEP_CWJAP_SET) {
+        return;
+    }
+    if(cloud_aliyun_at_cwlap_scan_async_active() != 0u || app_wifi_scan_busy() != 0u) {
+        return;
+    }
+    s_wifi_ip_verify_pending = 0u;
+    if(s_wifi_sta_ip_ok == 0u) {
+        return;
+    }
+    if(aliyun_ensure_sta_ip() != 0u) {
+        screen_wifi_gui_wake();
+        return;
+    }
+    cloud_aliyun_at_wifi_link_lost("CIFSR no STA IP");
+}
+
 static void cloud_aliyun_at_wifi_join_fail_finalize(void)
 {
     if(s_user_wifi_join_st == 1u) {
@@ -4462,10 +4655,17 @@ void cloud_aliyun_at_request_mqtt_connect(void)
 void cloud_aliyun_at_mqtt_session_disconnect(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
+    if(s_wifi_sta_ip_ok == 0u) {
+        if(s_step >= ALIYUN_STEP_CIPSTART) {
+            aliyun_mqtt_close_link0();
+        }
+        s_step = ALIYUN_STEP_WIFI_IDLE;
+        s_step_ms = HAL_GetTick();
+        s_cloud_scan_kick_done = 0u;
+        return;
+    }
     if(s_step >= ALIYUN_STEP_CIPSTART) {
-        (void)uart2_send_text("AT+CIPCLOSE=0\r\n");
-        (void)uart2_wait_text("OK", 400u);
-        cloud_uart2_hw_drain_ms(40u);
+        aliyun_mqtt_close_link0();
         cloud_uart2_rx_clear();
     }
     s_step = ALIYUN_STEP_CIFSR;
@@ -4747,6 +4947,9 @@ void cloud_aliyun_at_poll_5ms(void)
     scr11_pre_wifi = (uint8_t)(on_wifi_scr != 0u &&
                                cloud_aliyun_at_wifi_link_ready() == 0u &&
                                s_wifi_sta_ip_ok == 0u);
+
+    cloud_aliyun_at_poll_wifi_urc();
+    cloud_aliyun_at_poll_wifi_ip_verify();
 
     /* scr11 且尚未连 WiFi：仅允许用户 CWJAP/CIFSR，禁止 AT 链/MQTT 与 CWLAP 抢 UART2 */
     if(scr11_pre_wifi != 0u) {
@@ -5091,17 +5294,23 @@ void cloud_aliyun_at_poll_5ms(void)
                 break;
             }
             CWJAP_TRACE_MSG("[WiFi] CWJAP GOT IP\r\n");
-            if(joined_ssid != NULL && joined_ssid[0] != '\0') {
+            cloud_uart2_copy_cwjap_ssid(s_connected_sta_ssid, (uint16_t)sizeof(s_connected_sta_ssid));
+            if(s_connected_sta_ssid[0] == '\0' && joined_ssid != NULL && joined_ssid[0] != '\0') {
                 strncpy(s_connected_sta_ssid, joined_ssid, sizeof(s_connected_sta_ssid) - 1u);
                 s_connected_sta_ssid[sizeof(s_connected_sta_ssid) - 1u] = '\0';
             }
-            printf("[ALIYUN] WIFI connected SSID=%s\r\n", joined_ssid);
+            printf("[ALIYUN] WIFI connected SSID=%s sta_ssid=%s\r\n",
+                   (joined_ssid != NULL) ? joined_ssid : "",
+                   s_connected_sta_ssid);
             CWJAP_TRACE_MSG("[WiFi] CWJAP join ok\r\n");
             CLOUD_DBG("WIFI connected SSID=%s", joined_ssid);
             app_link_guard_wifi_end(1u);
             /* GOT IP 即可更新 scr11「已连接」栏；CIFSR 仅作校验 */
             s_wifi_sta_ip_ok = 1u;
             s_wifi_ever_up = 1u;
+            s_wifi_got_ip_ms = HAL_GetTick();
+            cloud_uart2_hw_drain_ms(60u);
+            cloud_uart2_rx_clear();
             if(s_user_wifi_join_st == 1u) {
                 s_wifi_join_fail_latch = 0u;
                 s_user_wifi_join_st = 2u;
@@ -5113,6 +5322,9 @@ void cloud_aliyun_at_poll_5ms(void)
             s_cwjap_esp_idle_ok = 0u;
             s_cwjap_light_join = 0u;
             s_cwjap_light_need_prep = 0u;
+            if(g_app_scr == APP_SCR_11) {
+                screen_wifi_notify_sta_up();
+            }
             cloud_aliyun_at_mqtt_kick_after_wifi();
             /* 本次连接请求已消费 */
             app_wifi_cfg_clear_reconnect_request();
@@ -5120,7 +5332,7 @@ void cloud_aliyun_at_poll_5ms(void)
             if((strstr(s_rx_win, "busy p") != NULL ||
                 (strstr(s_rx_win, "WIFI DISCONNECT") != NULL &&
                  strstr(s_rx_win, "WIFI GOT IP") == NULL)) &&
-               s_cwjap_busy_retry < 2u) {
+               s_cwjap_busy_retry < 1u) {
                 uint8_t idle_ok;
 
                 s_cwjap_busy_retry++;
@@ -5194,9 +5406,22 @@ void cloud_aliyun_at_poll_5ms(void)
         s_cifsr_last_try_ms = HAL_GetTick();
         if(uart2_send_text("AT+CIFSR\r\n") &&
            (uart2_wait_text("STAIP", ALIYUN_WAIT_MID_MS) || uart2_wait_text("+CIFSR:STAIP", ALIYUN_WAIT_MID_MS))) {
+            if(strstr(s_rx_win, "0.0.0.0") != NULL) {
+                s_wifi_sta_ip_ok = 0u;
+                s_cifsr_retry_cnt++;
+                break;
+            }
             s_cifsr_retry_cnt = 0u;
             s_wifi_sta_ip_ok = 1u;
             s_wifi_ever_up = 1u;
+            s_wifi_got_ip_ms = HAL_GetTick();
+            if(s_connected_sta_ssid[0] == '\0') {
+                const char *cfg_ssid = app_wifi_cfg_get_ssid();
+                if(cfg_ssid != NULL && cfg_ssid[0] != '\0') {
+                    strncpy(s_connected_sta_ssid, cfg_ssid, sizeof(s_connected_sta_ssid) - 1u);
+                    s_connected_sta_ssid[sizeof(s_connected_sta_ssid) - 1u] = '\0';
+                }
+            }
             if(s_user_wifi_join_st == 1u) {
                 s_wifi_join_fail_latch = 0u;
                 s_user_wifi_join_st = 2u;

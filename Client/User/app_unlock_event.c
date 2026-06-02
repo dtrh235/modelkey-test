@@ -12,6 +12,8 @@
 
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_SLAVE
 #include "app_rs485_proto.h"
+#include "app_slave_host_time.h"
+#include "app_slave_unlock_queue.h"
 #endif
 
 #if (APP_USE_FREERTOS == 1)
@@ -78,9 +80,22 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
     if(method == NULL) method = "";
 
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_SLAVE
-    /* 硬件开锁与 RS485 上报先走；界面必须在 GuiTask 里刷新 */
+    /* 硬件开锁先走；RS485 上报等主机侧校时窗口后再发（与主机开锁记录策略一致） */
     app_unlock_uart4_on_unlock_ok(account, method);
-    app_rs485_slave_unlock_notify_async(account, unlock_method_to_id(method));
+    if(app_slave_host_time_ready() != 0u) {
+#if (APP_SLAVE_USART1_DEBUG != 0)
+        SLAVE_DBG_LOG("[SLV][UNLOCK] rs485 notify now acc=%s mtd=%s",
+                      account, method);
+#endif
+        app_rs485_slave_unlock_notify_async(account, unlock_method_to_id(method));
+    } else {
+#if (APP_SLAVE_USART1_DEBUG != 0)
+        SLAVE_DBG_LOG("[SLV][UNLOCK] rs485 queued acc=%s mtd=%s wait_ms=%lu",
+                      account, method,
+                      (unsigned long)app_slave_host_time_ms_until_ready());
+#endif
+        app_slave_unlock_queue_push(account, unlock_method_to_id(method));
+    }
 #if (APP_USE_FREERTOS == 1)
     s_unlock_popup_type = popup_type;
     s_unlock_popup_pending = 1u;

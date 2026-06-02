@@ -396,6 +396,18 @@ void app_wifi_remember_init(void)
     flash_load();
 }
 
+void app_wifi_remember_on_wifi_down(void)
+{
+    REMEMBER_DBG("STA down: clear scr11 connect state");
+    s_scr11_auto_done = 0u;
+    s_manual_lock = 0u;
+    s_manual_ssid[0] = '\0';
+    s_failed_slot_mask = 0u;
+#if (APP_WIFI_AUTO_CONNECT_ENABLE == 1)
+    auto_batch_clear();
+#endif
+}
+
 void app_wifi_remember_scr11_reset(void)
 {
 #if (APP_WIFI_AUTO_CONNECT_ENABLE == 1)

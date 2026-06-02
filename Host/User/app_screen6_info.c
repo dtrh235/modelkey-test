@@ -44,20 +44,20 @@ static void screen6_get_pwd_for_found_acc(char *out_pwd, size_t out_sz)
     int idx;
     if(out_pwd == NULL || out_sz == 0u) return;
 
+    idx = users_find_index_by_acc(g_screen5_found_acc);
+    if(idx >= 0) {
+        strncpy(out_pwd, g_users[idx].pwd, out_sz - 1u);
+        out_pwd[out_sz - 1u] = '\0';
+        return;
+    }
+
     if(!g_default_admin_deleted && strcmp(g_screen5_found_acc, g_default_admin_account) == 0) {
         strncpy(out_pwd, g_default_admin_password, out_sz - 1u);
         out_pwd[out_sz - 1u] = '\0';
         return;
     }
 
-    idx = users_find_index_by_acc(g_screen5_found_acc);
-    if(idx < 0) {
-        out_pwd[0] = '\0';
-        return;
-    }
-
-    strncpy(out_pwd, g_users[idx].pwd, out_sz - 1u);
-    out_pwd[out_sz - 1u] = '\0';
+    out_pwd[0] = '\0';
 }
 
 void screen6_set_focus(uint8_t focus)

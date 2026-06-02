@@ -71,17 +71,13 @@ bool screen5_try_lookup_acc(void)
     len = strlen(acc);
     if(len < 1u || len > 12u) return false;
 
-    if(strcmp(acc, g_default_admin_account) == 0) {
-        if(!g_default_admin_deleted) {
-            found = true;
-            is_admin = g_default_admin_is_admin_role ? true : false;
-        }
-    } else {
-        idx = users_find_index_by_acc(acc);
-        if(idx >= 0) {
-            found = true;
-            is_admin = (g_users[idx].is_admin ? true : false);
-        }
+    idx = users_find_index_by_acc(acc);
+    if(idx >= 0) {
+        found = true;
+        is_admin = (g_users[idx].is_admin ? true : false);
+    } else if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
+        found = true;
+        is_admin = g_default_admin_is_admin_role ? true : false;
     }
 
     if(!found) return false;

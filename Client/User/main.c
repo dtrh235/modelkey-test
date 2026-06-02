@@ -31,10 +31,12 @@
 #include "app_rs485_proto.h"
 #if APP_RS485_IS_SLAVE
 #include "app_slave_fp_sync.h"
+#include "app_slave_host_time.h"
 #endif
 #endif
 #include "app_nav_entries.h"
 #include "app_slave_ui_fixup.h"
+#include "app_touch_ui.h"
 #include "app_home_fp_poll.h"
 #include "app_fp_hw_diag.h"
 
@@ -152,6 +154,9 @@ static void app_gui_task(void *argument)
 #endif /* !APP_RS485_IS_SLAVE */
 
         app_key_ui_handle();
+#if APP_RS485_IS_SLAVE
+        app_touch_ui_handle();
+#endif
         screen1_cursor_blink_handle();
 #if !APP_RS485_IS_SLAVE
         screen2_cursor_blink_handle();
@@ -251,6 +256,7 @@ static void app_rs485_slave_task(void *argument)
         app_rs485_slave_server_poll(APP_RS485_SLAVE_LISTEN_MS);
         app_rs485_slave_upkeep_mirror_request();
         app_rs485_slave_flush_pending_notify();
+        app_slave_host_time_status_poll();
         vTaskDelay(pdMS_TO_TICKS(1u));
     }
 }
@@ -348,11 +354,11 @@ int main(void)
     app_fp_hw_boot_diag(&g_fp_hw_inited);
 #if (APP_SLAVE_USART1_DEBUG != 0)
     slave_boot_uart_sync_and_log_reset();
-#if (APP_SLAVE_LOG_VERBOSE != 0)
-    SLAVE_DBG_LOG("[SLV] boot tick=%lu RS485=%u addr=%02X peer=%02X",
+    SLAVE_DBG_LOG("[SLV] diag USART1 PA9/TX PA10/RX 115200");
+    SLAVE_DBG_LOG("[SLV] boot tick=%lu RS485=%u addr=%02X peer=%02X NFC=%u",
                   (unsigned long)HAL_GetTick(), (unsigned)(APP_RS485_ENABLE),
-                  (unsigned)APP_RS485_LOCAL_ADDR, (unsigned)APP_RS485_PEER_ADDR);
-#endif
+                  (unsigned)APP_RS485_LOCAL_ADDR, (unsigned)APP_RS485_PEER_ADDR,
+                  (unsigned)APP_NFC_ENABLE);
 #endif
     app_iwdg_feed();
 //    led_init();                         /* 初始化LED */

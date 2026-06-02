@@ -102,6 +102,7 @@ static uint32_t s_last_list_merge_ms = 0u;
 #define WIFI_LIST_MERGE_MIN_MS  200u
 #define WIFI_LIST_MERGE_HOLD_MS 600u
 static uint32_t s_merge_hold_until_ms = 0u;
+static volatile uint8_t s_force_list_merge = 0u;
 static uint8_t s_gui_wake = 0u;
 
 static void screen_wifi_layout_scan_row(void);
@@ -510,6 +511,23 @@ static void screen_wifi_hide_empty_hint(void)
     }
 }
 
+/* 扫描完成前隐藏列表区，避免半成品行闪一下「口」 */
+static void screen_wifi_list_conceal_for_scan(void)
+{
+    screen_wifi_clear_rows();
+    screen_wifi_hide_empty_hint();
+    if(lv_obj_is_valid(guider_ui.screen_11_list_panel)) {
+        lv_obj_add_flag(guider_ui.screen_11_list_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void screen_wifi_list_reveal(void)
+{
+    if(lv_obj_is_valid(guider_ui.screen_11_list_panel)) {
+        lv_obj_clear_flag(guider_ui.screen_11_list_panel, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void screen_wifi_show_empty_hint(void)
 {
     lv_obj_t *panel;
@@ -577,28 +595,43 @@ static void screen_wifi_update_connected_bar(void)
     /* 仅 STA 已拿到 IP 时显示；wifi_joined() 在 scr11 上常为真会误显示 */
     if(cloud_aliyun_at_wifi_link_ready() == 0u) {
         lv_obj_add_flag(guider_ui.screen_11_row_connected, LV_OBJ_FLAG_HIDDEN);
+        WIFI_DBG("conn bar hide: link_ready=0");
         return;
     }
-    lv_obj_clear_flag(guider_ui.screen_11_row_connected, LV_OBJ_FLAG_HIDDEN);
     ssid_buf[0] = '\0';
     /* 禁止在 GuiTask 里发 AT+CWJAP?：会与 CloudTask 抢 UART2 导致整屏卡死 */
     (void)cloud_aliyun_at_get_connected_ssid(ssid_buf, sizeof(ssid_buf));
     if(ssid_buf[0] == '\0') {
-        const char *cfg_ssid = app_wifi_cfg_get_ssid();
-        if(cfg_ssid != NULL && cfg_ssid[0] != '\0') {
-            lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, cfg_ssid);
-        } else {
-            lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, "-");
-        }
-    } else {
-        lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, ssid_buf);
+        lv_obj_add_flag(guider_ui.screen_11_row_connected, LV_OBJ_FLAG_HIDDEN);
+        WIFI_DBG("conn bar hide: link_ready=1 no ssid");
+        return;
     }
+    lv_obj_clear_flag(guider_ui.screen_11_row_connected, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(guider_ui.screen_11_lbl_conn_ssid, ssid_buf);
+    WIFI_DBG("conn bar show ssid=%s", ssid_buf);
     if(lv_obj_is_valid(guider_ui.screen_11_lbl_conn_sta)) {
         lv_obj_set_style_text_font(guider_ui.screen_11_lbl_conn_sta, &lv_font_cn_wifi_16,
                                    LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_label_set_text(guider_ui.screen_11_lbl_conn_sta, "\xe5\xb7\xb2\xe8\xbf\x9e\xe6\x8e\xa5");
         lv_obj_clear_flag(guider_ui.screen_11_lbl_conn_sta, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static const lv_font_t *screen_wifi_ssid_font(const char *ssid)
+{
+    const uint8_t *p;
+
+    if(ssid == NULL) {
+        return &lv_font_montserratMedium_16;
+    }
+    p = (const uint8_t *)ssid;
+    while(*p != 0u) {
+        if(*p >= 0x80u) {
+            return &lv_font_SourceHanSerifSC_Regular_21;
+        }
+        p++;
+    }
+    return &lv_font_montserratMedium_16;
 }
 
 static void screen_wifi_save_sel_ssid(void)
@@ -716,7 +749,8 @@ static uint8_t screen_wifi_append_row(const char *ssid)
     lv_label_set_long_mode(name, LV_LABEL_LONG_CLIP);
     lv_obj_set_width(name, WIFI_LIST_NAME_W);
     lv_obj_set_pos(name, WIFI_LIST_NAME_X, 6);
-    lv_obj_set_style_text_font(name, &lv_font_montserratMedium_16, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(name, screen_wifi_ssid_font(ssid),
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_color(name, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     s_rows[idx].row = row_obj;
@@ -873,6 +907,10 @@ static uint8_t screen_wifi_should_merge_list_now(void)
     if(app_wifi_scan_peek_list_dirty() == 0u) {
         return 0u;
     }
+    /* 仅扫描完整结束后再合并，避免扫描中途增量刷出乱码行 */
+    if(screen_wifi_scan_pass_done() == 0u) {
+        return 0u;
+    }
     if((int32_t)(now_ms - s_merge_hold_until_ms) < 0) {
         return 0u;
     }
@@ -918,15 +956,10 @@ static void screen_wifi_list_scroll_restore(lv_coord_t y)
 
 static void screen_wifi_merge_list(void)
 {
-    uint8_t i;
     uint8_t n;
-    uint8_t rows_before;
-    int8_t restore_idx;
     char conn_ssid[33];
     uint8_t scan_done;
     lv_coord_t scroll_keep = 0;
-    uint32_t now_ms = lv_tick_get();
-    const uint32_t k_remove_grace_ms = 15000u; /* 15s：避免一次扫漏就闪消失 */
 
     if(!lv_obj_is_valid(guider_ui.screen_11_list_panel)) {
         WIFI_DBG("UI merge abort: list_panel invalid");
@@ -938,19 +971,34 @@ static void screen_wifi_merge_list(void)
         return;
     }
 
-    rows_before = s_list_built_count;
     scroll_keep = screen_wifi_list_scroll_capture();
     screen_wifi_save_sel_ssid();
+    scan_done = screen_wifi_scan_pass_done();
     n = app_wifi_scan_count();
+    printf("[WiFi] UI merge start ap=%u built=%u scan_done=%u\r\n",
+           (unsigned)n, (unsigned)s_list_built_count, (unsigned)scan_done);
     WIFI_DBG("UI merge start scan_ap=%u", (unsigned)n);
     screen_wifi_hide_empty_hint();
-    scan_done = screen_wifi_scan_pass_done();
+
+    /* 扫描未完成时不刷新列表，避免先闪几行「口」再整表重建 */
+    if(scan_done == 0u) {
+        return;
+    }
 
     if(app_wifi_scan_last_failed() != 0u) {
         screen_wifi_clear_rows();
         screen_wifi_hide_empty_hint();
         screen_wifi_update_scan_hint();
         screen_wifi_refresh_btn_raise();
+        s_force_list_merge = 0u;
+        return;
+    }
+    if(n == 0u) {
+        screen_wifi_clear_rows();
+        screen_wifi_list_reveal();
+        screen_wifi_update_scan_hint();
+        screen_wifi_refresh_btn_raise();
+        s_force_list_merge = 0u;
         return;
     }
 
@@ -959,116 +1007,14 @@ static void screen_wifi_merge_list(void)
         (void)cloud_aliyun_at_get_connected_ssid(conn_ssid, sizeof(conn_ssid));
     }
 
-    if(scan_done != 0u) {
-        screen_wifi_rebuild_list_from_scan(conn_ssid);
-        screen_wifi_list_scroll_restore(scroll_keep);
-        screen_wifi_sync_list_scroll_range();
-        screen_wifi_refresh_btn_raise();
-        WIFI_DBG("UI merge done rows=%u sel=%u (rebuild)",
-                 (unsigned)s_list_built_count, (unsigned)s_sel_index);
-        (void)rows_before;
-        return;
-    }
-
-    /* 扫描过程中：仅增量追加，避免闪烁。 */
-    if(s_list_built_count == 0u) {
-        for(i = 0u; i < n; i++) {
-            const app_wifi_ap_t *ap = app_wifi_scan_get(i);
-            if(ap == NULL || ap->ssid[0] == '\0') {
-                continue;
-            }
-            if(conn_ssid[0] != '\0' && strcmp(ap->ssid, conn_ssid) == 0) {
-                continue;
-            }
-            {
-                int8_t ri = screen_wifi_find_row_by_ssid(ap->ssid);
-                if(ri >= 0) {
-                    s_row_last_seen_ms[(uint8_t)ri] = now_ms;
-                    continue;
-                }
-            }
-            if(screen_wifi_append_row(ap->ssid) != 0u) {
-                s_row_last_seen_ms[(uint8_t)(s_list_built_count - 1u)] = now_ms;
-            }
-        }
-    } else {
-        /* 扫描过程中：仅增量追加新 AP，不清空不删除，避免闪烁/卡顿。 */
-        for(i = 0u; i < n; i++) {
-            const app_wifi_ap_t *ap = app_wifi_scan_get(i);
-            if(ap == NULL || ap->ssid[0] == '\0') {
-                continue;
-            }
-            if(conn_ssid[0] != '\0' && strcmp(ap->ssid, conn_ssid) == 0) {
-                continue;
-            }
-            {
-                int8_t ri = screen_wifi_find_row_by_ssid(ap->ssid);
-                if(ri >= 0) {
-                    s_row_last_seen_ms[(uint8_t)ri] = now_ms;
-                    continue;
-                }
-            }
-            if(screen_wifi_append_row(ap->ssid) != 0u) {
-                s_row_last_seen_ms[(uint8_t)(s_list_built_count - 1u)] = now_ms;
-            }
-        }
-    }
-
-    /* 扫描完成后做“差量删除”：超过 grace 且扫描列表也没了，才删除。 */
-    if(scan_done != 0u && s_list_built_count > 0u) {
-        int16_t idx;
-        for(idx = (int16_t)s_list_built_count - 1; idx >= 0; idx--) {
-            const char *ssid;
-            uint8_t uidx = (uint8_t)idx;
-
-            if(s_rows[uidx].lbl_name == NULL) {
-                continue;
-            }
-            ssid = lv_label_get_text(s_rows[uidx].lbl_name);
-            if(ssid == NULL || ssid[0] == '\0') {
-                continue;
-            }
-            if(app_wifi_connect_busy() != 0u) {
-                const char *cfg = app_wifi_cfg_get_ssid();
-                if(cfg != NULL && cfg[0] != '\0' && strcmp(ssid, cfg) == 0) {
-                    continue; /* 正在连接的目标不删 */
-                }
-            }
-            if(lv_tick_elaps(s_row_last_seen_ms[uidx]) < k_remove_grace_ms) {
-                continue;
-            }
-            if(app_wifi_scan_has_ssid(ssid) != 0u) {
-                continue;
-            }
-            screen_wifi_remove_row(uidx);
-        }
-    }
-
-    if(s_list_built_count == 0u) {
-        s_sel_index = 0u;
-        s_sel_ssid[0] = '\0';
-        if(scan_done != 0u) {
-            WIFI_DBG("UI merge done: 0 rows -> empty hint (no AP found)");
-            screen_wifi_show_empty_hint();
-        } else {
-            WIFI_DBG("UI merge done: 0 rows (scanning/retry)");
-            screen_wifi_hide_empty_hint();
-        }
-        return;
-    }
-
-    restore_idx = screen_wifi_find_row_by_ssid(s_sel_ssid);
-    if(restore_idx < 0) {
-        if(s_sel_index < s_list_built_count) {
-            restore_idx = (int8_t)s_sel_index;
-        } else {
-            restore_idx = 0;
-        }
-    }
-    screen_wifi_set_selected_ex((uint8_t)restore_idx, 0u);
+    screen_wifi_rebuild_list_from_scan(conn_ssid);
+    screen_wifi_list_reveal();
     screen_wifi_list_scroll_restore(scroll_keep);
-    screen_wifi_clamp_list_scroll();
-    WIFI_DBG("UI merge done rows=%u sel=%u", (unsigned)s_list_built_count, (unsigned)s_sel_index);
+    screen_wifi_sync_list_scroll_range();
+    screen_wifi_refresh_btn_raise();
+    WIFI_DBG("UI merge done rows=%u sel=%u (rebuild only)",
+             (unsigned)s_list_built_count, (unsigned)s_sel_index);
+    s_force_list_merge = 0u;
 }
 
 static void screen_wifi_scan_dots_apply_text(uint8_t n)
@@ -1081,6 +1027,10 @@ static void screen_wifi_scan_dots_apply_text(uint8_t n)
     if(n > 3u) {
         n = 3u;
     }
+    lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_font(guider_ui.screen_11_label_scan_dots,
+                               &lv_font_SourceHanSerifSC_Regular_25,
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_label_set_text(guider_ui.screen_11_label_scan_dots, k_dots[n]);
 }
 
@@ -1371,6 +1321,9 @@ void screen_wifi_refresh_once(void)
         }
         app_wifi_connect_reset();
     }
+    if(app_link_guard_mqtt() != 0u) {
+        app_link_guard_mqtt_end(0u);
+    }
     if(app_link_guard_blocks_scan() != 0u) {
         printf("[WiFi] refresh ignored: link guard\r\n");
         return;
@@ -1378,10 +1331,14 @@ void screen_wifi_refresh_once(void)
     app_wifi_scan_release_connect_hold();
     g_wifi_scan_abort = 0u;
     app_wifi_scan_request_now();
-    printf("[WiFi] refresh tap\r\n");
+    printf("[WiFi] refresh tap excl=%u pend=%u busy=%u guard=%u\r\n",
+           (unsigned)g_wifi_exclusive,
+           (unsigned)g_wifi_scan_pending,
+           (unsigned)app_wifi_scan_busy(),
+           (unsigned)app_link_guard_blocks_scan());
+    screen_wifi_list_conceal_for_scan();
     screen_wifi_show_scanning();
     screen_wifi_scan_dots_anim_reset();
-    screen_wifi_hide_empty_hint();
     screen_wifi_gui_wake();
 #endif
 }
@@ -1459,6 +1416,9 @@ void screen_wifi_prepare_on_enter(void)
 #endif
     screen_wifi_show_enter_idle_hint();
     screen_wifi_update_connected_bar();
+    if(cloud_aliyun_at_wifi_link_ready() != 0u) {
+        cloud_aliyun_at_request_wifi_ip_verify();
+    }
     screen_wifi_refresh_btn_raise();
 }
 
@@ -1467,12 +1427,41 @@ void screen_wifi_gui_wake(void)
     s_gui_wake = 1u;
 }
 
+void screen_wifi_notify_scan_start(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    if(g_app_scr != APP_SCR_11) {
+        return;
+    }
+    screen_wifi_list_conceal_for_scan();
+    screen_wifi_show_scanning();
+    screen_wifi_scan_dots_anim_reset();
+    screen_wifi_gui_wake();
+#endif
+}
+
+void screen_wifi_notify_scan_done(void)
+{
+    s_force_list_merge = 1u;
+    s_scan_dots_anim_on = 0u;
+    screen_wifi_gui_wake();
+}
+
 void screen_wifi_notify_sta_up(void)
 {
     s_connecting_row = 0xFFu;
     if(g_app_scr == APP_SCR_11) {
         screen_wifi_show_connect_result(1u);
     }
+    screen_wifi_update_connected_bar();
+    screen_wifi_gui_wake();
+}
+
+void screen_wifi_notify_sta_down(void)
+{
+    s_connecting_row = 0xFFu;
+    s_pending_ssid[0] = '\0';
+    s_scan_dots_anim_on = 0u;
     screen_wifi_update_connected_bar();
     screen_wifi_gui_wake();
 }
@@ -1539,7 +1528,9 @@ void screen_wifi_poll_tick(void)
                 screen_wifi_scan_dots_anim_tick();
             }
         } else {
-            uint8_t scan_ui = (uint8_t)(busy != 0u || app_wifi_scan_has_pending() != 0u ||
+            /* 仅真实扫描进行中显示「扫描中」；仅 pending 时 Cloud 可能还在等 mutex */
+            uint8_t scan_ui = (uint8_t)(busy != 0u ||
+                                        cloud_aliyun_at_cwlap_scan_async_active() != 0u ||
                                         s_scan_dots_anim_on != 0u);
             if(scan_ui != 0u) {
                 if(!s_scan_dots_anim_on) {
@@ -1568,6 +1559,19 @@ void screen_wifi_poll_tick(void)
     }
 
     s_last_scan_busy = busy;
+
+    if(s_force_list_merge != 0u && !screen_wifi_popup_is_active() &&
+       screen_wifi_scan_pass_done() != 0u && app_wifi_scan_count() > 0u) {
+        s_force_list_merge = 0u;
+        (void)app_wifi_scan_take_list_dirty();
+        s_last_list_merge_ms = lv_tick_get();
+        screen_wifi_merge_list();
+        screen_wifi_update_scan_hint();
+    } else if(s_force_list_merge != 0u && screen_wifi_scan_pass_done() != 0u) {
+        s_force_list_merge = 0u;
+        screen_wifi_list_reveal();
+        screen_wifi_update_scan_hint();
+    }
 
     if(app_wifi_remember_scr11_poll() != 0u) {
         screen_wifi_update_connected_bar();

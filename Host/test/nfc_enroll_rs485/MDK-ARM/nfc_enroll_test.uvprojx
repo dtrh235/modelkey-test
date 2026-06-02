@@ -336,7 +336,7 @@
               <MiscControls>--locale=english --preinclude=..\User\test_preinclude.h</MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx,APP_RS485_ENABLE=1</Define>
               <Undefine></Undefine>
-              <IncludePath>..\User;..\..\..\Drivers;..\..\..\Drivers\CMSIS\Include;..\..\..\Drivers\CMSIS\Device\ST\STM32F4xx\Include;..\..\..\Drivers\STM32F4xx_HAL_Driver\Inc;..\..\..\Drivers\BSP\mfrc522;..\..\..\Drivers\SYSTEM\sys;..\..\..\Drivers\SYSTEM\delay;..\..\..\User</IncludePath>
+              <IncludePath>..\User;..\..\..\Drivers;..\..\..\Drivers\CMSIS\Include;..\..\..\Drivers\CMSIS\Device\ST\STM32F4xx\Include;..\..\..\Drivers\STM32F4xx_HAL_Driver\Inc;..\..\..\Drivers\BSP\mfrc522;..\..\..\Drivers\BSP\W25Q16;..\..\..\Drivers\SYSTEM\sys;..\..\..\Drivers\SYSTEM\delay;..\..\..\User</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -434,6 +434,16 @@
               <FileName>app_rs485_link.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\User\app_rs485_link.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Drivers/BSP/W25Q</GroupName>
+          <Files>
+            <File>
+              <FileName>bsp_w25q16.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Drivers\BSP\W25Q16\bsp_w25q16.c</FilePath>
             </File>
           </Files>
         </Group>

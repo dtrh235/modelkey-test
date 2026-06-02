@@ -23,21 +23,19 @@ void screen6_save_identity(bool is_admin)
 
     if(acc == NULL || acc[0] == '\0') return;
 
-    if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
+    idx = users_find_index_by_acc(acc);
+    if(idx >= 0) {
+        now_admin = g_users[idx].is_admin;
+        if(now_admin != 0u && !is_admin && users_admin_count() <= 1u) {
+            return;
+        }
+        g_users[idx].is_admin = is_admin ? 1u : 0u;
+    } else if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
         now_admin = g_default_admin_is_admin_role;
         if(now_admin != 0u && !is_admin && users_admin_count() <= 1u) {
             return;
         }
         g_default_admin_is_admin_role = is_admin ? 1u : 0u;
-    } else {
-        idx = users_find_index_by_acc(acc);
-        if(idx >= 0) {
-            now_admin = g_users[idx].is_admin;
-            if(now_admin != 0u && !is_admin && users_admin_count() <= 1u) {
-                return;
-            }
-            g_users[idx].is_admin = is_admin ? 1u : 0u;
-        }
     }
 
     g_screen5_found_is_admin = is_admin ? 1u : 0u;
@@ -70,6 +68,18 @@ bool screen6_try_commit_password_change(const char *new_pwd)
         return false;
     }
 
+    idx = users_find_index_by_acc(acc);
+    if(idx >= 0) {
+        strncpy(g_users[idx].pwd, new_pwd, sizeof(g_users[idx].pwd) - 1u);
+        g_users[idx].pwd[sizeof(g_users[idx].pwd) - 1u] = '\0';
+        (void)users_storage_save();
+        cloud_ota_service_report_event(CLOUD_EVT_USER_PWD_CHANGE_OK, acc);
+#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
+        users_mirror_schedule_acc(acc);
+#endif
+        return true;
+    }
+
     if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
         strncpy(g_default_admin_password, new_pwd, sizeof(g_default_admin_password) - 1u);
         g_default_admin_password[sizeof(g_default_admin_password) - 1u] = '\0';
@@ -81,17 +91,6 @@ bool screen6_try_commit_password_change(const char *new_pwd)
         return true;
     }
 
-    idx = users_find_index_by_acc(acc);
-    if(idx < 0) {
-        cloud_ota_service_report_event(CLOUD_EVT_USER_PWD_CHANGE_FAIL, acc);
-        return false;
-    }
-    strncpy(g_users[idx].pwd, new_pwd, sizeof(g_users[idx].pwd) - 1u);
-    g_users[idx].pwd[sizeof(g_users[idx].pwd) - 1u] = '\0';
-    (void)users_storage_save();
-    cloud_ota_service_report_event(CLOUD_EVT_USER_PWD_CHANGE_OK, acc);
-#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
-    users_mirror_schedule_acc(acc);
-#endif
-    return true;
+    cloud_ota_service_report_event(CLOUD_EVT_USER_PWD_CHANGE_FAIL, acc);
+    return false;
 }

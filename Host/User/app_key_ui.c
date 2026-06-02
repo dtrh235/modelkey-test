@@ -270,20 +270,19 @@ void app_key_ui_dispatch(KeyValue_t key)
             } else if(key == KEY_OK) {
                 if(g_screen7_choice_yes) {
                     const char *acc = lv_textarea_get_text(guider_ui.screen_7_ta_1);
-                    if(strcmp(acc, g_default_admin_account) == 0) {
-                        g_default_admin_deleted = 1u;
-                        g_default_admin_has_nfc = 0u;
-                        memset(g_default_admin_nfc_uid, 0, sizeof(g_default_admin_nfc_uid));
-                        users_clear_fp_by_acc(acc, 1u);
-                        (void)users_storage_save();
-#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
-                        users_mirror_schedule_delete(acc);
-#endif
-                        screen7_show_delete_result(1u, 1u);
-                    } else if(users_try_delete_by_acc(acc)) {
-                        screen7_show_delete_result(1u, 0u);
+                    int idx = users_find_index_by_acc(acc);
+                    uint8_t was_admin = 0u;
+                    if(idx >= 0 && g_users[idx].is_admin != 0u) {
+                        was_admin = 1u;
+                    } else if(!g_default_admin_deleted &&
+                              strcmp(acc, g_default_admin_account) == 0 &&
+                              g_default_admin_is_admin_role != 0u) {
+                        was_admin = 1u;
+                    }
+                    if(users_try_delete_by_acc(acc)) {
+                        screen7_show_delete_result(1u, was_admin);
                     } else {
-                        screen7_show_delete_result(0u, 0u);
+                        screen7_show_delete_result(0u, was_admin);
                     }
                 } else {
                     screen7_show_delete_result(0u, 0u);

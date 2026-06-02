@@ -1,5 +1,7 @@
 #include "app_screen4_table.h"
 
+#include <string.h>
+
 #include "lvgl.h"
 #include "gui_guider.h"
 #include "app_user_ops.h"
@@ -8,123 +10,286 @@
 extern lv_ui guider_ui;
 extern user_cred_t g_users[APP_USER_MAX];
 extern uint8_t g_user_count;
-extern uint8_t g_default_admin_deleted;
-extern uint8_t g_default_admin_is_admin_role;
-extern char g_default_admin_account[13];
 
-void screen4_refresh_table(void)
+#define SCR4_ROW_H          34
+#define SCR4_LIST_PANEL_X   0
+#define SCR4_LIST_PANEL_Y   48
+#define SCR4_LIST_PANEL_W   240
+#define SCR4_LIST_PANEL_H   220
+#define SCR4_HDR_H          28
+#define SCR4_ROW_MAX        APP_USER_MAX
+
+LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_20);
+
+static lv_obj_t *s_hdr_bar = NULL;
+static lv_obj_t *s_list_panel = NULL;
+static lv_obj_t *s_empty_hint = NULL;
+static lv_obj_t *s_row_objs[SCR4_ROW_MAX];
+static uint8_t s_row_count = 0u;
+
+static void screen4_clear_rows(void)
 {
-    lv_obj_t *table = guider_ui.screen_4_table_1;
-    if(!lv_obj_is_valid(table)) return;
-
-    const uint16_t header_row = 0u;
-    uint16_t user_cnt = 0u;
-    uint16_t max_rows = lv_table_get_row_cnt(table);
-    uint16_t max_data_rows = (max_rows > 1u) ? (max_rows - 1u) : 0u;
-    uint16_t row;
-    uint16_t placed;
-    uint16_t target;
     uint8_t i;
 
-    if(!g_default_admin_deleted) user_cnt++;
-    for(i = 0u; i < g_user_count; i++) {
-        if(g_users[i].active) user_cnt++;
-    }
-
-    lv_table_set_col_cnt(table, 2u);
-    lv_table_set_col_width(table, 0u, 120);
-    lv_table_set_col_width(table, 1u, 120);
-
-    lv_table_set_cell_value(table, header_row, 0u, "账号");
-    lv_table_set_cell_value(table, header_row, 1u, "身份");
-
-    if(max_data_rows == 0u) return;
-
-    if(user_cnt == 0u) {
-        lv_table_set_cell_value(table, 1u, 0u, "无用户");
-        lv_table_set_cell_value(table, 1u, 1u, "");
-        for(row = 2u; row < max_rows; row++) {
-            lv_table_set_cell_value(table, row, 0u, "");
-            lv_table_set_cell_value(table, row, 1u, "");
+    for(i = 0u; i < s_row_count; i++) {
+        if(s_row_objs[i] != NULL && lv_obj_is_valid(s_row_objs[i])) {
+            lv_obj_del(s_row_objs[i]);
         }
+        s_row_objs[i] = NULL;
+    }
+    s_row_count = 0u;
+    s_empty_hint = NULL;
+    if(s_list_panel != NULL && lv_obj_is_valid(s_list_panel)) {
+        lv_obj_clean(s_list_panel);
+    }
+}
+
+static void screen4_hide_empty_hint(void)
+{
+    if(s_empty_hint != NULL && lv_obj_is_valid(s_empty_hint)) {
+        lv_obj_add_flag(s_empty_hint, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void screen4_show_empty_hint(void)
+{
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel)) {
+        return;
+    }
+    if(s_empty_hint == NULL || !lv_obj_is_valid(s_empty_hint)) {
+        s_empty_hint = lv_label_create(s_list_panel);
+        lv_label_set_text(s_empty_hint, "无用户");
+        lv_obj_set_style_text_font(s_empty_hint, &lv_font_SourceHanSerifSC_Regular_20,
+                                   LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(s_empty_hint, lv_color_hex(0x666666),
+                                   LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_align(s_empty_hint, LV_ALIGN_CENTER, 0, 0);
+    }
+    lv_obj_clear_flag(s_empty_hint, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_empty_hint);
+}
+
+static void screen4_list_panel_setup(void)
+{
+    lv_obj_t *parent;
+    lv_obj_t *lbl_acc;
+    lv_obj_t *lbl_role;
+
+    if(s_list_panel != NULL && lv_obj_is_valid(s_list_panel)) {
         return;
     }
 
-    target = user_cnt;
-    if(target > max_data_rows) target = max_data_rows;
-
-    row = 1u;
-    placed = 0u;
-    if(!g_default_admin_deleted) {
-        lv_table_set_cell_value(table, row, 0u, g_default_admin_account);
-        lv_table_set_cell_value(table, row, 1u, g_default_admin_is_admin_role ? "管理员" : "用户");
-        row++;
-        placed++;
+    parent = guider_ui.screen_4_cont_1;
+    if(parent == NULL || !lv_obj_is_valid(parent)) {
+        return;
     }
 
-    for(i = 0u; i < g_user_count && placed < target; i++) {
-        if(!g_users[i].active) continue;
-        lv_table_set_cell_value(table, row, 0u, g_users[i].acc);
-        lv_table_set_cell_value(table, row, 1u, g_users[i].is_admin ? "管理员" : "用户");
-        row++;
-        placed++;
+    if(lv_obj_is_valid(guider_ui.screen_4_table_1)) {
+        lv_obj_add_flag(guider_ui.screen_4_table_1, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(guider_ui.screen_4_table_1, LV_OBJ_FLAG_CLICKABLE);
     }
 
-    for(; row < max_rows; row++) {
-        lv_table_set_cell_value(table, row, 0u, "");
-        lv_table_set_cell_value(table, row, 1u, "");
+    s_hdr_bar = lv_obj_create(parent);
+    lv_obj_set_pos(s_hdr_bar, SCR4_LIST_PANEL_X, SCR4_LIST_PANEL_Y);
+    lv_obj_set_size(s_hdr_bar, SCR4_LIST_PANEL_W, SCR4_HDR_H);
+    lv_obj_clear_flag(s_hdr_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(s_hdr_bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(s_hdr_bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_hdr_bar, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_hdr_bar, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(s_hdr_bar, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lbl_acc = lv_label_create(s_hdr_bar);
+    lv_label_set_text(lbl_acc, "账号");
+    lv_obj_set_pos(lbl_acc, 8, 4);
+    lv_obj_set_style_text_font(lbl_acc, &lv_font_SourceHanSerifSC_Regular_20,
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lbl_role = lv_label_create(s_hdr_bar);
+    lv_label_set_text(lbl_role, "身份");
+    lv_obj_set_pos(lbl_role, 128, 4);
+    lv_obj_set_style_text_font(lbl_role, &lv_font_SourceHanSerifSC_Regular_20,
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    s_list_panel = lv_obj_create(parent);
+    lv_obj_set_pos(s_list_panel, SCR4_LIST_PANEL_X, (lv_coord_t)(SCR4_LIST_PANEL_Y + SCR4_HDR_H));
+    lv_obj_set_size(s_list_panel, SCR4_LIST_PANEL_W,
+                    (lv_coord_t)(SCR4_LIST_PANEL_H - SCR4_HDR_H));
+    lv_obj_set_layout(s_list_panel, 0);
+    lv_obj_add_flag(s_list_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(s_list_panel, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(s_list_panel, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_clear_flag(s_list_panel, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_clear_flag(s_list_panel, LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    lv_obj_set_style_pad_all(s_list_panel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(s_list_panel, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_list_panel, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(s_list_panel, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);
+}
+
+static lv_coord_t screen4_list_scroll_max_y(void)
+{
+    lv_coord_t content_h;
+
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel) || s_row_count == 0u) {
+        return 0;
     }
+    content_h = (lv_coord_t)((lv_coord_t)s_row_count * SCR4_ROW_H);
+    if(content_h <= lv_obj_get_height(s_list_panel)) {
+        return 0;
+    }
+    return (lv_coord_t)(content_h - lv_obj_get_height(s_list_panel));
+}
+
+static void screen4_clamp_list_scroll(void)
+{
+    lv_coord_t y;
+    lv_coord_t max_y;
+
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel)) {
+        return;
+    }
+    max_y = screen4_list_scroll_max_y();
+    y = lv_obj_get_scroll_y(s_list_panel);
+    if(y < 0) {
+        lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);
+    } else if(max_y > 0 && y > max_y) {
+        lv_obj_scroll_to_y(s_list_panel, max_y, LV_ANIM_OFF);
+    } else if(max_y <= 0 && y != 0) {
+        lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);
+    }
+}
+
+static void screen4_append_row(const char *acc, const char *role)
+{
+    lv_obj_t *row;
+    lv_obj_t *lbl_acc;
+    lv_obj_t *lbl_role;
+
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel) ||
+       acc == NULL || s_row_count >= SCR4_ROW_MAX) {
+        return;
+    }
+
+    screen4_hide_empty_hint();
+
+    row = lv_obj_create(s_list_panel);
+    lv_obj_set_pos(row, 0, (lv_coord_t)((lv_coord_t)s_row_count * SCR4_ROW_H));
+    lv_obj_set_size(row, SCR4_LIST_PANEL_W, SCR4_ROW_H);
+    lv_obj_set_style_pad_all(row, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_width(row, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(row, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(row, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_CLICKABLE);
+
+    lbl_acc = lv_label_create(row);
+    lv_label_set_text(lbl_acc, acc);
+    lv_label_set_long_mode(lbl_acc, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(lbl_acc, 110);
+    lv_obj_set_pos(lbl_acc, 8, 6);
+    lv_obj_set_style_text_font(lbl_acc, &lv_font_SourceHanSerifSC_Regular_20,
+                              LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lbl_role = lv_label_create(row);
+    lv_label_set_text(lbl_role, role);
+    lv_label_set_long_mode(lbl_role, LV_LABEL_LONG_CLIP);
+    lv_obj_set_width(lbl_role, 90);
+    lv_obj_set_pos(lbl_role, 128, 6);
+    lv_obj_set_style_text_font(lbl_role, &lv_font_SourceHanSerifSC_Regular_20,
+                               LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    s_row_objs[s_row_count] = row;
+    s_row_count++;
+}
+
+void screen4_refresh_table(void)
+{
+    uint8_t i;
+    uint8_t n = 0u;
+
+    screen4_list_panel_setup();
+    screen4_clear_rows();
+
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel)) {
+        return;
+    }
+
+    for(i = 0u; i < g_user_count; i++) {
+        if(g_users[i].active != 0u) {
+            n++;
+        }
+    }
+
+    if(n == 0u) {
+        screen4_show_empty_hint();
+        lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);
+        return;
+    }
+
+    for(i = 0u; i < g_user_count; i++) {
+        if(g_users[i].active == 0u) {
+            continue;
+        }
+        screen4_append_row(g_users[i].acc, g_users[i].is_admin ? "管理员" : "用户");
+    }
+
+    lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);
+    screen4_clamp_list_scroll();
+}
+
+void screen4_list_scroll_by(lv_coord_t dy)
+{
+    lv_coord_t max_y;
+    int32_t ny;
+    lv_coord_t y;
+
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel)) {
+        return;
+    }
+    if(dy == 0 || s_row_count == 0u) {
+        return;
+    }
+    max_y = screen4_list_scroll_max_y();
+    if(max_y <= 0) {
+        lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);
+        return;
+    }
+    if(dy > 24) {
+        dy = 24;
+    } else if(dy < -24) {
+        dy = -24;
+    }
+    y = lv_obj_get_scroll_y(s_list_panel);
+    ny = (int32_t)y - (int32_t)dy * 2;
+    if(ny < 0) {
+        ny = 0;
+    } else if(ny > (int32_t)max_y) {
+        ny = (int32_t)max_y;
+    }
+    lv_obj_scroll_to_y(s_list_panel, (lv_coord_t)ny, LV_ANIM_OFF);
 }
 
 void screen4_handle_table_key(KeyValue_t key)
 {
-    lv_obj_t *table = guider_ui.screen_4_table_1;
-    if(!lv_obj_is_valid(table)) return;
     if(key == KEY_UP) {
-        int32_t k = LV_KEY_UP;
-        lv_event_send(table, LV_EVENT_KEY, &k);
+        screen4_list_scroll_by(-12);
     } else if(key == KEY_DOWN) {
-        int32_t k = LV_KEY_DOWN;
-        lv_event_send(table, LV_EVENT_KEY, &k);
+        screen4_list_scroll_by(12);
     }
 }
 
-void screen4_touch_select_row(lv_coord_t x, lv_coord_t y)
+uint8_t screen4_point_in_list(lv_coord_t x, lv_coord_t y)
 {
-    lv_obj_t *table = guider_ui.screen_4_table_1;
-    lv_area_t area;
-    uint16_t row_cnt;
-    uint16_t cur_row;
-    uint16_t cur_col;
-    uint16_t target;
-    lv_coord_t row_h;
+    lv_area_t a;
+    lv_point_t p;
 
-    if(!lv_obj_is_valid(table)) return;
-
-    lv_obj_get_coords(table, &area);
-    if(x < area.x1 || x > area.x2 || y < area.y1 || y > area.y2) return;
-
-    row_cnt = lv_table_get_row_cnt(table);
-    if(row_cnt <= 1u) return;
-
-    row_h = (lv_coord_t)((area.y2 - area.y1 + 1) / (lv_coord_t)row_cnt);
-    if(row_h < 1) row_h = 1;
-
-    target = (uint16_t)((y - area.y1) / row_h);
-    if(target == 0u) target = 1u;
-    if(target >= row_cnt) target = (uint16_t)(row_cnt - 1u);
-
-    lv_table_get_selected_cell(table, &cur_row, &cur_col);
-    if(cur_row == LV_TABLE_CELL_NONE) cur_row = 1u;
-
-    while(cur_row < target) {
-        screen4_handle_table_key(KEY_DOWN);
-        lv_table_get_selected_cell(table, &cur_row, &cur_col);
-        if(cur_row == LV_TABLE_CELL_NONE) break;
+    if(s_list_panel == NULL || !lv_obj_is_valid(s_list_panel)) {
+        return 0u;
     }
-    while(cur_row > target && cur_row != LV_TABLE_CELL_NONE) {
-        screen4_handle_table_key(KEY_UP);
-        lv_table_get_selected_cell(table, &cur_row, &cur_col);
-        if(cur_row == LV_TABLE_CELL_NONE) break;
-    }
+    lv_obj_get_coords(s_list_panel, &a);
+    p.x = x;
+    p.y = y;
+    return _lv_area_is_point_on(&a, &p, 0) ? 1u : 0u;
 }

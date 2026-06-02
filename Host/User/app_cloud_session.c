@@ -42,6 +42,15 @@ void app_cloud_session_init(void)
     s_last_upload_ms = 0u;
 }
 
+void app_cloud_session_wifi_down(void)
+{
+    s_st = SESS_OFF;
+    s_phase_ms = 0u;
+    s_offline_ms = 0u;
+    s_last_upload_ms = 0u;
+    CLOUD_TRACE_MSG("[CLOUD] session wifi down\r\n");
+}
+
 uint8_t app_cloud_session_busy(void)
 {
     return (s_st == SESS_CONNECTING) ? 1u : 0u;

@@ -3,6 +3,7 @@
 #include "./BSP/TOUCH/touch.h"
 #include "./BSP/TOUCH/ctiic.h"
 #include "./BSP/TOUCH/ft5206.h"
+#include "app_config.h"
 #include "./SYSTEM/usart/usart.h"
 #include "./SYSTEM/delay/delay.h"
 
@@ -135,7 +136,7 @@ uint8_t ft5206_scan(uint8_t mode)
     
     t++;
     
-    if ((t % 10) == 0 || t < 10)   /* ?????,?????10??CTP_Scan????????1??,??????CPU????? */
+    if((t % 10) == 0 || t < 10 || FT5206_INT == 0)
     {
         ft5206_rd_reg(FT5206_REG_NUM_FINGER, &sta, 1);  /* ???????????? */
 
@@ -158,8 +159,15 @@ uint8_t ft5206_scan(uint8_t mode)
                     }
                     else
                     {
-                        tp_dev.x[i] = lcddev.width - (((uint16_t)(buf[0] & 0X0F) << 8) + buf[1]);
-                        tp_dev.y[i] = ((uint16_t)(buf[2] & 0X0F) << 8) + buf[3];
+                        uint16_t rx = (uint16_t)(((buf[0] & 0X0F) << 8) + buf[1]);
+                        uint16_t ry = (uint16_t)(((buf[2] & 0X0F) << 8) + buf[3]);
+
+#if defined(APP_TP_MIRROR_X) && (APP_TP_MIRROR_X != 0)
+                        tp_dev.x[i] = lcddev.width - rx;
+#else
+                        tp_dev.x[i] = rx;
+#endif
+                        tp_dev.y[i] = ry;
                     }
 
                     if ((buf[0] & 0XF0) != 0X80)tp_dev.x[i] = tp_dev.y[i] = 0;      /* ??????contact????????????�� */

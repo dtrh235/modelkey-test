@@ -7,6 +7,8 @@
 
 void app_wifi_remember_init(void);
 void app_wifi_remember_scr11_reset(void);
+/* WiFi STA 掉线：清 scr11 自动连/手动连残留，便于重新扫描 */
+void app_wifi_remember_on_wifi_down(void);
 void app_wifi_remember_on_scan_done(void);
 /* GuiTask scr11 tick: poll connect + walk auto batch; returns 1 on new connect OK */
 uint8_t app_wifi_remember_scr11_poll(void);
