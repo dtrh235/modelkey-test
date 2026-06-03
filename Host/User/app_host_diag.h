@@ -36,4 +36,17 @@
 #define HOST_RS485_LOG_VERBOSE(...) ((void)0)
 #endif
 
+#ifndef APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE
+#define APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE 0
+#endif
+#if (APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE != 0)
+#define HOST_UNLOCK_CLOUD_LOG(...) do { \
+        char _host_uc_buf[200]; \
+        (void)snprintf(_host_uc_buf, sizeof(_host_uc_buf), __VA_ARGS__); \
+        usart_debug_tx_str(_host_uc_buf); \
+    } while(0)
+#else
+#define HOST_UNLOCK_CLOUD_LOG(...) ((void)0)
+#endif
+
 #endif /* APP_HOST_DIAG_H */

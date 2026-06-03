@@ -9,7 +9,7 @@
 
 #include "app_slave_diag.h"
 
-#if (APP_TOUCH_UART_DEBUG != 0)
+#if (APP_TOUCH_UART_DEBUG != 0) && defined(APP_SLAVE_TOUCH_TRACE_LOG) && (APP_SLAVE_TOUCH_TRACE_LOG != 0)
 #define TOUCH_LOG(...) SLAVE_DBG_LOG("[SLV][TOUCH] " __VA_ARGS__)
 #else
 #define TOUCH_LOG(...) ((void)0)

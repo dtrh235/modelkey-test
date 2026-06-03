@@ -2,7 +2,7 @@
  * @file test_main.c
  * @brief 焊板自检：外部 W25Q16 + MFRC522 NFC，RS485(USART6) 打印
  *
- * 接线与 Host 主工程一致：
+ * 接线与 Client 从机主工程一致：
  *   RS485: PC6=TX(DI), PC7=RX(RO), PC8=DE/RE, 115200
  *   W25Q16: PA15=CS, PB3=SCK, PB4=MISO, PB5=MOSI
  *   MFRC522: PB12=NSS, PB13=SCK, PB15=MOSI, PB14=MISO, PD1=RST

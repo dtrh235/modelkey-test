@@ -6,8 +6,20 @@
 
 #include "lvgl.h"
 #include "gui_guider.h"
+#include "widgets_init.h"
 
 extern lv_ui guider_ui;
+
+static void sanitize_screen1_ta(lv_obj_t *ta)
+{
+    if(ta == NULL || !lv_obj_is_valid(ta)) {
+        return;
+    }
+    lv_obj_remove_event_cb(ta, ta_event_cb);
+    lv_obj_clear_flag(ta, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(ta, LV_OBJ_FLAG_CLICK_FOCUSABLE);
+    lv_obj_clear_flag(ta, LV_OBJ_FLAG_SCROLLABLE);
+}
 
 static void hide_ok_esc_btn(lv_obj_t *btn, lv_obj_t *lbl)
 {
@@ -23,6 +35,12 @@ static void hide_ok_esc_btn(lv_obj_t *btn, lv_obj_t *lbl)
             lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
         }
     }
+}
+
+void app_slave_ui_sanitize_screen1_textareas(void)
+{
+    sanitize_screen1_ta(guider_ui.screen_1_ta_1);
+    sanitize_screen1_ta(guider_ui.screen_1_ta_2);
 }
 
 void app_slave_ui_hide_corner_ok_esc(void)

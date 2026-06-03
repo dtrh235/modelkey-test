@@ -37,6 +37,37 @@
 static uint8_t s_tx_seq;
 #if APP_RS485_IS_SLAVE
 static volatile uint8_t s_slave_mirror_sync_seen;
+static struct {
+    uint8_t buf[RS485_HDR_FIXED + 32u + RS485_CRC_LEN];
+    uint16_t len;
+    uint8_t valid;
+} s_rs485_slave_pending_rsp;
+
+static void rs485_slave_stash_rsp_frame(const uint8_t *rxb, uint16_t n)
+{
+    if(rxb == NULL || n < (uint16_t)(RS485_HDR_FIXED + RS485_CRC_LEN) ||
+       n > (uint16_t)sizeof(s_rs485_slave_pending_rsp.buf)) {
+        return;
+    }
+    memcpy(s_rs485_slave_pending_rsp.buf, rxb, n);
+    s_rs485_slave_pending_rsp.len = n;
+    s_rs485_slave_pending_rsp.valid = 1u;
+}
+
+static uint8_t rs485_slave_take_pending_rsp(uint8_t *rxb, uint16_t cap, uint16_t *out_n)
+{
+    if(out_n == NULL || rxb == NULL || s_rs485_slave_pending_rsp.valid == 0u) {
+        return 0u;
+    }
+    if(s_rs485_slave_pending_rsp.len > cap) {
+        s_rs485_slave_pending_rsp.valid = 0u;
+        return 0u;
+    }
+    memcpy(rxb, s_rs485_slave_pending_rsp.buf, s_rs485_slave_pending_rsp.len);
+    *out_n = s_rs485_slave_pending_rsp.len;
+    s_rs485_slave_pending_rsp.valid = 0u;
+    return 1u;
+}
 #endif
 
 #if (APP_USE_FREERTOS == 1)
@@ -75,26 +106,22 @@ void app_rs485_slave_flush_pending_notify(void)
     }
 
     if(s_unlock_notify_pending != 0u) {
-        ok = false;
-        for(try_n = 0u; try_n < 3u; try_n++) {
-            if(try_n > 0u) {
-                vTaskDelay(pdMS_TO_TICKS(40u));
-            }
-            ok = app_rs485_proto_slave_unlock_notify(s_unlock_notify_acc, s_unlock_notify_mid, 400u);
-            if(ok) {
-                break;
-            }
-        }
-        s_unlock_notify_pending = 0u;
-#if (APP_SLAVE_USART1_DEBUG != 0)
+        ok = app_rs485_proto_slave_unlock_notify(s_unlock_notify_acc, s_unlock_notify_mid, 400u);
+#if (APP_SLAVE_UNLOCK_CLOUD_TRACE != 0)
         if(ok) {
-            SLAVE_DBG_LOG("[SLV][RS485] unlock_notify OK acc=%s mid=%u",
-                          s_unlock_notify_acc, (unsigned)s_unlock_notify_mid);
+            SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] rs485 tx OK acc=%s mid=%u",
+                                   s_unlock_notify_acc, (unsigned)s_unlock_notify_mid);
         } else {
-            SLAVE_DBG_LOG("[SLV][RS485] unlock_notify FAIL acc=%s mid=%u",
-                          s_unlock_notify_acc, (unsigned)s_unlock_notify_mid);
+            SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] rs485 tx FAIL acc=%s mid=%u -> re-queue",
+                                   s_unlock_notify_acc, (unsigned)s_unlock_notify_mid);
         }
 #endif
+        if(ok) {
+            s_unlock_notify_pending = 0u;
+        } else {
+            app_slave_unlock_queue_push(s_unlock_notify_acc, s_unlock_notify_mid);
+            s_unlock_notify_pending = 0u;
+        }
     }
 
     if(s_fp_commit_pending != 0u) {
@@ -419,6 +446,89 @@ static uint8_t rs485_parse_rsp(const uint8_t *rsp, uint16_t rsp_len, uint8_t exp
     return 1u;
 }
 
+#if (APP_USE_FREERTOS == 1)
+static void rs485_post_tx_gap(void)
+{
+    vTaskDelay(pdMS_TO_TICKS(APP_RS485_POST_TX_GAP_MS));
+}
+#else
+static void rs485_post_tx_gap(void)
+{
+    HAL_Delay(APP_RS485_POST_TX_GAP_MS);
+}
+#endif
+
+static bool rs485_send_reply(uint8_t seq, uint8_t rsp_cmd, uint8_t err_byte);
+
+#if APP_RS485_IS_SLAVE
+/* 主机下发的请求帧（PING/用户同步等），在等 ACK 时也要先应答再继续收。 */
+static uint8_t rs485_slave_serve_master_frame(const uint8_t *rxb, uint16_t n)
+{
+    uint16_t plen;
+    uint8_t cmd;
+    uint8_t seq;
+    uint8_t err;
+    bool okb;
+    uint8_t fp_chunk_replied = 0u;
+
+    if(rxb == NULL || n < (uint16_t)(RS485_HDR_FIXED + RS485_CRC_LEN)) {
+        return 0u;
+    }
+    if(rs485_frame_crc_ok(rxb, n) == 0u) {
+        return 0u;
+    }
+    if(rxb[2] != APP_RS485_LOCAL_ADDR || rxb[3] != APP_RS485_PEER_ADDR) {
+        return 0u;
+    }
+    cmd = rxb[5];
+    seq = rxb[4];
+    plen = (uint16_t)rxb[6] | ((uint16_t)rxb[7] << 8);
+    if((cmd & 0x80u) != 0u) {
+        return 0u;
+    }
+
+    app_slave_host_time_on_host_frame();
+    err = 0u;
+    okb = true;
+
+    if(cmd == 0x01u && plen == 0u) {
+        okb = rs485_send_reply(seq, 0x81u, 0u);
+    } else if(cmd == 0x02u && plen == (uint16_t)sizeof(user_cred_t)) {
+        user_cred_t u;
+        memcpy(&u, rxb + RS485_HDR_FIXED, sizeof(u));
+        okb = users_slave_mirror_apply_user(&u);
+        s_slave_mirror_sync_seen = 1u;
+        err = okb ? 0u : 1u;
+        okb = rs485_send_reply(seq, 0x82u, err);
+    } else if(cmd == 0x03u && plen == 13u) {
+        char acc[13];
+        memcpy(acc, rxb + RS485_HDR_FIXED, sizeof(acc));
+        acc[12] = '\0';
+        okb = users_slave_mirror_delete_by_acc(acc);
+        err = okb ? 0u : 1u;
+        okb = rs485_send_reply(seq, 0x83u, err);
+    } else if(cmd == RS485_CMD_FP_TEMPLATE && plen == (uint16_t)sizeof(rs485_fp_tpl_chunk_t)) {
+        const rs485_fp_tpl_chunk_t *chunk = (const rs485_fp_tpl_chunk_t *)(rxb + RS485_HDR_FIXED);
+        if(app_slave_fp_write_busy() != 0u || app_slave_fp_mirror_hold() != 0u) {
+            err = 2u;
+            okb = rs485_send_reply(seq, 0x85u, err);
+            fp_chunk_replied = 1u;
+        }
+        if(fp_chunk_replied == 0u) {
+            okb = app_slave_fp_template_chunk_rx(chunk) ? true : false;
+            s_slave_mirror_sync_seen = 1u;
+            err = okb ? 0u : 1u;
+            okb = rs485_send_reply(seq, 0x85u, err);
+        }
+    } else {
+        okb = rs485_send_reply(seq, (uint8_t)(cmd | 0x80u), 1u);
+    }
+    (void)okb;
+    (void)err;
+    return 1u;
+}
+#endif
+
 static bool rs485_do_cmd(uint8_t cmd, const uint8_t *payload, uint16_t payload_len, uint32_t tout_ms)
 {
     uint8_t txb[RS485_HDR_FIXED + 160u + RS485_CRC_LEN];
@@ -448,23 +558,73 @@ static bool rs485_do_cmd(uint8_t cmd, const uint8_t *payload, uint16_t payload_l
         goto out;
     }
 
-    /* RX: recv_frame syncs A5 5A then full frame; do not blind-read 8 bytes. */
-
+    rs485_post_tx_gap();
     memset(rxb, 0, sizeof(rxb));
     {
-        uint16_t nfr = app_rs485_recv_frame(rxb, (uint16_t)sizeof(rxb), tout_ms);
+        uint32_t wait_deadline_ms = HAL_GetTick() + tout_ms;
+#if APP_RS485_IS_SLAVE
+        uint16_t pending_n = 0u;
 
-        if(nfr < (uint16_t)(RS485_HDR_FIXED + RS485_CRC_LEN)) {
-            goto out;
+        if(rs485_slave_take_pending_rsp(rxb, (uint16_t)sizeof(rxb), &pending_n) != 0u) {
+            uint16_t pending_plen = (uint16_t)rxb[6] | ((uint16_t)rxb[7] << 8);
+            uint16_t pending_total = (uint16_t)(RS485_HDR_FIXED + pending_plen + RS485_CRC_LEN);
+
+            if(pending_total <= pending_n &&
+               rs485_parse_rsp(rxb, pending_total, (uint8_t)(cmd | 0x80u), seq_save) != 0u) {
+                ok_ret = true;
+            }
         }
-        plen = (uint16_t)rxb[6] | ((uint16_t)rxb[7] << 8);
-        total = (uint16_t)(RS485_HDR_FIXED + plen + RS485_CRC_LEN);
-        if(total > (uint16_t)sizeof(rxb) || nfr < total) {
-            goto out;
+#endif
+        for(;;) {
+            uint32_t now_ms;
+            uint32_t left_ms;
+            uint32_t slice_ms;
+            uint16_t nfr;
+
+            if(ok_ret) {
+                break;
+            }
+            now_ms = HAL_GetTick();
+            if((int32_t)(wait_deadline_ms - now_ms) <= 0) {
+                break;
+            }
+            left_ms = (uint32_t)(wait_deadline_ms - now_ms);
+            slice_ms = (left_ms > 60u) ? 60u : left_ms;
+            if(slice_ms == 0u) {
+                slice_ms = 1u;
+            }
+
+            nfr = app_rs485_recv_frame(rxb, (uint16_t)sizeof(rxb), slice_ms);
+            if(nfr < (uint16_t)(RS485_HDR_FIXED + RS485_CRC_LEN)) {
+                continue;
+            }
+            plen = (uint16_t)rxb[6] | ((uint16_t)rxb[7] << 8);
+            total = (uint16_t)(RS485_HDR_FIXED + plen + RS485_CRC_LEN);
+            if(total > (uint16_t)sizeof(rxb) || nfr < total) {
+                continue;
+            }
+            if(rs485_parse_rsp(rxb, total, (uint8_t)(cmd | 0x80u), seq_save) != 0u) {
+                ok_ret = true;
+                break;
+            }
+#if APP_RS485_IS_SLAVE
+            if(rs485_slave_serve_master_frame(rxb, total) != 0u) {
+                continue;
+            }
+            if((rxb[5] & 0x80u) != 0u) {
+                rs485_slave_stash_rsp_frame(rxb, total);
+                continue;
+            }
+#endif
         }
     }
-    ok_ret = (rs485_parse_rsp(rxb, total, (uint8_t)(cmd | 0x80u), seq_save) != 0u) ? true : false;
 out:
+#if (APP_SLAVE_UNLOCK_CLOUD_TRACE != 0) && APP_RS485_IS_SLAVE
+    if((ok_ret == false) && (cmd == RS485_CMD_SLAVE_UNLOCK_NOTIFY)) {
+        SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] rs485_do_cmd fail link=%u",
+                               (unsigned)app_rs485_link_ready());
+    }
+#endif
     rs485_proto_mutex_give();
     return ok_ret;
 }
@@ -603,13 +763,8 @@ void app_rs485_slave_server_poll(uint32_t read_tout_ms)
 {
     uint8_t rxb[RS485_HDR_FIXED + sizeof(rs485_fp_tpl_chunk_t) + RS485_CRC_LEN];
     uint16_t n;
-    uint16_t plen;
     uint8_t cmd;
-    uint8_t seq;
-    uint8_t err;
-    bool okb;
     uint32_t listen_ms = read_tout_ms;
-    uint8_t fp_chunk_replied = 0u;
 
     if(app_rs485_link_ready() == 0u) {
         return;
@@ -650,77 +805,18 @@ void app_rs485_slave_server_poll(uint32_t read_tout_ms)
     }
 
     cmd = rxb[5];
-    seq = rxb[4];
-    plen = (uint16_t)rxb[6] | ((uint16_t)rxb[7] << 8);
-
-    err = 0u;
-    okb = true;
-    app_slave_host_time_on_host_frame();
 
     if((cmd & 0x80u) != 0u) {
-#if APP_RS485_IS_SLAVE
-        /* Responses to slave-initiated requests (e.g. mirror_req ACK 0x84). */
+        rs485_slave_stash_rsp_frame(rxb, n);
         if(cmd == (uint8_t)(RS485_CMD_MIRROR_SYNC_REQ | 0x80u) ||
            cmd == 0x82u || cmd == 0x85u ||
            cmd == (uint8_t)(RS485_CMD_FP_COMMIT_NOTIFY | 0x80u)) {
             s_slave_mirror_sync_seen = 1u;
         }
-#endif
         return;
-    } else if(cmd == 0x01u && plen == 0u) {
-        static uint32_t s_last_ping_log_ms;
-        uint32_t now = HAL_GetTick();
-        if((now - s_last_ping_log_ms) >= 60000u) {
-            s_last_ping_log_ms = now;
-            FP_MIRROR_LOG("[SLV][RS485] PING -> ACK (throttled 60s)");
-        }
-        okb = rs485_send_reply(seq, 0x81u, 0u);
-    } else if(cmd == 0x02u && plen == (uint16_t)sizeof(user_cred_t)) {
-        user_cred_t u;
-        memcpy(&u, rxb + RS485_HDR_FIXED, sizeof(u));
-        okb = users_slave_mirror_apply_user(&u);
-#if APP_RS485_IS_SLAVE
-        s_slave_mirror_sync_seen = 1u;
-#endif
-        err = okb ? 0u : 1u;
-        okb = rs485_send_reply(seq, 0x82u, err);
-    } else if(cmd == 0x03u && plen == 13u) {
-        char acc[13];
-        memcpy(acc, rxb + RS485_HDR_FIXED, sizeof(acc));
-        acc[12] = '\0';
-        okb = users_slave_mirror_delete_by_acc(acc);
-        err = okb ? 0u : 1u;
-        okb = rs485_send_reply(seq, 0x83u, err);
-    } else if(cmd == RS485_CMD_FP_TEMPLATE && plen == (uint16_t)sizeof(rs485_fp_tpl_chunk_t)) {
-        const rs485_fp_tpl_chunk_t *chunk = (const rs485_fp_tpl_chunk_t *)(rxb + RS485_HDR_FIXED);
-        /* 只在 AS608 正在写入时拒绝（防止同一页被覆写），
-           quiet_active 期间仍可接收并排队，FpTask 会等 quiet 过期后再写 */
-        if(app_slave_fp_write_busy() != 0u || app_slave_fp_mirror_hold() != 0u) {
-            FP_MIRROR_LOG("[SLV][FP] reject chunk page=%u idx=%u (AS608 busy)",
-                          (unsigned)chunk->page_id, (unsigned)chunk->chunk_idx);
-            err = 2u; /* busy: ask host retry later */
-            okb = rs485_send_reply(seq, 0x85u, err);
-            fp_chunk_replied = 1u;
-        }
-        if(fp_chunk_replied == 0u) {
-            okb = app_slave_fp_template_chunk_rx(chunk) ? true : false;
-#if APP_RS485_IS_SLAVE
-            s_slave_mirror_sync_seen = 1u;
-#endif
-            err = okb ? 0u : 1u;
-            okb = rs485_send_reply(seq, 0x85u, err);
-        }
-    } else {
-        SLAVE_DBG_LOG("[SLV][RS485] unknown cmd=0x%02X plen=%u", (unsigned)cmd, (unsigned)plen);
-        okb = rs485_send_reply(seq, (uint8_t)(cmd | 0x80u), 1u);
     }
 
-#if (APP_SLAVE_USART1_DEBUG != 0)
-    if((okb == false) || (err != 0u) ||
-       ((cmd == 0x01u) && (APP_SLAVE_LOG_VERBOSE != 0))) {
-        SLAVE_DBG_LOG("[SLV][RS485] reply err_byte=%u send_ok=%u", (unsigned)err, (unsigned)(okb ? 1u : 0u));
-    }
-#endif
+    (void)rs485_slave_serve_master_frame(rxb, n);
 }
 #else
 void app_rs485_slave_server_poll(uint32_t read_tout_ms)

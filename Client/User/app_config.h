@@ -56,8 +56,7 @@
 #define APP_RS485_PEER_ADDR     ((APP_RS485_NODE_ROLE == APP_RS485_ROLE_MASTER) ? 0x02u : 0x01u)
 
 #ifndef APP_SLAVE_USART1_DEBUG
-/* USART1 PA9/TX PA10/RX 115200: RS485 host / touch / NFC diag */
-#define APP_SLAVE_USART1_DEBUG 1
+#define APP_SLAVE_USART1_DEBUG 0
 #endif
 #ifndef APP_FP_SLAVE_MATCH_VIA_HOST
 #define APP_FP_SLAVE_MATCH_VIA_HOST 1
@@ -70,7 +69,7 @@
 #endif
 
 #ifndef APP_FP_MIRROR_DIAG
-#define APP_FP_MIRROR_DIAG       1
+#define APP_FP_MIRROR_DIAG       0
 #endif
 /* ILI9341 + FT6336 电容触摸(I2C PB6/PB7, INT PB1, RST PE8)，与主机一致 */
 #ifndef APP_TP_FT6336_CAP_ONLY
@@ -82,6 +81,16 @@
 /* 0: 串口只打 NFC 刷卡诊断 + RS485 镜像/异常 + 简短启动行；1: 恢复原先冗长日志(PING/心跳/寄存器 dump 等) */
 #ifndef APP_SLAVE_LOG_VERBOSE
 #define APP_SLAVE_LOG_VERBOSE 0
+#endif
+#ifndef APP_SLAVE_TOUCH_TRACE_LOG
+#define APP_SLAVE_TOUCH_TRACE_LOG 0
+#endif
+/* 1: 仅从机开锁→RS485→主机→云端 链路日志（账号/指纹/NFC） */
+#ifndef APP_SLAVE_UNLOCK_CLOUD_TRACE
+#define APP_SLAVE_UNLOCK_CLOUD_TRACE 0
+#endif
+#ifndef APP_SLAVE_NFC_UNLOCK_TRACE
+#define APP_SLAVE_NFC_UNLOCK_TRACE  0
 #endif
 /* 从机每轮 RS485 监听窗口（过短会导致主机 cmd no rsp） */
 #ifndef APP_RS485_SLAVE_LISTEN_MS
@@ -116,7 +125,7 @@
 #endif
 /* 从机：收到主机 RS485 首帧后再等待该时长才上报开锁（对齐主机 SNTP） */
 #ifndef APP_SLAVE_UNLOCK_DEFER_RS485_MS
-#define APP_SLAVE_UNLOCK_DEFER_RS485_MS  45000u
+#define APP_SLAVE_UNLOCK_DEFER_RS485_MS  15000u
 #endif
 #ifndef APP_SLAVE_UNLOCK_NO_HOST_FALLBACK_MS
 #define APP_SLAVE_UNLOCK_NO_HOST_FALLBACK_MS  120000u

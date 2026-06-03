@@ -30,6 +30,8 @@
 #include "app_state.h"
 #include "app_home_nav_btns.h"
 #include "cloud_ota_service.h"
+#include "app_slave_diag.h"
+#include "app_iwdg.h"
 
 #include "./BSP/KEY/key.h"
 
@@ -38,31 +40,71 @@
 extern uint32_t HAL_GetTick(void);
 
 #if APP_RS485_IS_SLAVE
+#if defined(APP_SLAVE_TOUCH_TRACE_LOG) && (APP_SLAVE_TOUCH_TRACE_LOG != 0)
+#define SLAVE_KEY_LOG(...) SLAVE_DBG_LOG(__VA_ARGS__)
+#else
+#define SLAVE_KEY_LOG(...) ((void)0)
+#endif
+
+static const char *app_key_name(KeyValue_t key)
+{
+    switch(key) {
+    case KEY_UP: return "UP";
+    case KEY_DOWN: return "DOWN";
+    case KEY_LEFT: return "LEFT";
+    case KEY_RIGHT: return "RIGHT";
+    case KEY_OK: return "OK";
+    case KEY_ESC: return "ESC";
+    default: return "NONE";
+    }
+}
+
 static void app_key_ui_screen1(KeyValue_t key)
 {
+    SLAVE_KEY_LOG("[SLV][KEY] screen1 key=%s(%u) begin", app_key_name(key), (unsigned)key);
     if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
+        SLAVE_KEY_LOG("[SLV][KEY] skip: unlock popup showing");
         return;
     }
     if(key == KEY_ESC) {
+        app_iwdg_feed();
         screen1_clear_auth_inputs();
+        app_iwdg_feed();
+        SLAVE_KEY_LOG("[SLV][KEY] ESC clear inputs done");
         return;
     }
     if(key == KEY_OK) {
         const char *acc = lv_textarea_get_text(guider_ui.screen_1_ta_1);
         const char *pwd = lv_textarea_get_text(guider_ui.screen_1_ta_2);
+        SLAVE_KEY_LOG("[SLV][KEY] OK auth begin acc=%s pwd_len=%u",
+                      (acc != NULL) ? acc : "",
+                      (unsigned)((pwd != NULL) ? strlen(pwd) : 0u));
+        app_iwdg_feed();
         if(unlock_credentials_match_with_delete(acc, pwd)) {
+            app_iwdg_feed();
             screen1_hide_error_label();
             app_unlock_event_handle_success(APP_UNLOCK_POPUP_SCREEN1, acc, "password");
+            SLAVE_KEY_LOG("[SLV][KEY] OK auth PASS");
         } else {
+            app_iwdg_feed();
             screen1_show_error_label();
+            SLAVE_KEY_LOG("[SLV][KEY] OK auth FAIL");
         }
     } else if(key == KEY_UP && g_screen1_field_index > 0u) {
+        app_iwdg_feed();
         screen1_set_field_selected(g_screen1_field_index - 1u);
+        SLAVE_KEY_LOG("[SLV][KEY] select field=%u", (unsigned)g_screen1_field_index);
     } else if(key == KEY_DOWN && g_screen1_field_index < 1u) {
+        app_iwdg_feed();
         screen1_set_field_selected(g_screen1_field_index + 1u);
+        SLAVE_KEY_LOG("[SLV][KEY] select field=%u", (unsigned)g_screen1_field_index);
     } else {
+        app_iwdg_feed();
         screen1_handle_input_key(key);
+        SLAVE_KEY_LOG("[SLV][KEY] input key forwarded=%s", app_key_name(key));
     }
+    app_iwdg_feed();
+    SLAVE_KEY_LOG("[SLV][KEY] screen1 key=%s done", app_key_name(key));
 }
 
 void app_key_ui_dispatch(KeyValue_t key)
@@ -70,7 +112,10 @@ void app_key_ui_dispatch(KeyValue_t key)
     if(key == KEY_NONE) {
         return;
     }
+    SLAVE_KEY_LOG("[SLV][KEY] dispatch key=%s(%u) scr=%u",
+                  app_key_name(key), (unsigned)key, (unsigned)g_app_scr);
     if(g_app_scr != APP_SCR_1) {
+        SLAVE_KEY_LOG("[SLV][KEY] dispatch skip: not screen1");
         return;
     }
     app_key_ui_screen1(key);

@@ -139,6 +139,51 @@ static uint32_t wall_clock_now_epoch(void)
     return s_anchor_epoch;
 }
 
+static volatile uint8_t s_home_ui_pending;
+static uint8_t s_home_ui_has_set;
+static int s_home_ui_y;
+static int s_home_ui_mo;
+static int s_home_ui_d;
+static int s_home_ui_h;
+static int s_home_ui_mi;
+static int s_home_ui_s;
+
+void app_wall_clock_schedule_home_ui(int year, int month, int day, int hour, int min, int sec)
+{
+    s_home_ui_y = year;
+    s_home_ui_mo = month;
+    s_home_ui_d = day;
+    s_home_ui_h = hour;
+    s_home_ui_mi = min;
+    s_home_ui_s = sec;
+    s_home_ui_has_set = 1u;
+    app_wall_clock_on_set(year, month, day, hour, min, sec);
+    s_home_ui_pending = 1u;
+}
+
+void app_wall_clock_schedule_ui_refresh(void)
+{
+    s_home_ui_has_set = 0u;
+    s_home_ui_pending = 1u;
+}
+
+void app_wall_clock_gui_poll(void)
+{
+    uint8_t pending;
+
+    pending = s_home_ui_pending;
+    if(pending == 0u) {
+        return;
+    }
+    s_home_ui_pending = 0u;
+    if(s_home_ui_has_set != 0u) {
+        app_home_wall_clock_set(s_home_ui_y, s_home_ui_mo, s_home_ui_d,
+                                s_home_ui_h, s_home_ui_mi, s_home_ui_s);
+    } else {
+        app_home_wall_clock_refresh_ui();
+    }
+}
+
 void app_wall_clock_on_set(int year, int month, int day, int hour, int min, int sec)
 {
     s_wall.year = year;

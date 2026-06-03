@@ -113,7 +113,7 @@ void time_trace_tx(const char *s)
 
 void cloud_trace_tx(const char *s)
 {
-#if (APP_CLOUD_TRACE != 0)
+#if (APP_CLOUD_TRACE != 0) || (APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE != 0)
     if(s != NULL) {
         usart_debug_tx_str(s);
     }

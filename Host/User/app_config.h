@@ -76,6 +76,10 @@
 #ifndef APP_RTOS_HEARTBEAT_DEBUG
 #define APP_RTOS_HEARTBEAT_DEBUG 0
 #endif
+/* 1=启动阶段 [BOOT] 串口日志（白屏/卡死时看 PA9 115200 停在哪一步） */
+#ifndef APP_BOOT_STAGE_LOG
+#define APP_BOOT_STAGE_LOG  0
+#endif
 /* 1=仅 [TP] 触屏串口日志（PA9/PA10，需 APP_DEBUG_ON_USART6=0） */
 #ifndef APP_TOUCH_UART_DEBUG
 #define APP_TOUCH_UART_DEBUG     0
@@ -129,6 +133,10 @@
 /* 0: 只打镜像结果/PING 失败/从机开锁上报与 RS485 错误；1: 增加每帧 dump、PING OK、布线长提示等 */
 #ifndef APP_HOST_RS485_LOG_VERBOSE
 #define APP_HOST_RS485_LOG_VERBOSE 0
+#endif
+/* 1: 仅从机开锁经主机上报云端 链路日志（账号/指纹/NFC） */
+#ifndef APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE
+#define APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE 0
 #endif
 /* 发完一帧后等待从机切换 DE/RE 再收应答 */
 #ifndef APP_RS485_POST_TX_GAP_MS
@@ -188,7 +196,7 @@
 #ifndef APP_CLOUD_UART_DEBUG
 #define APP_CLOUD_UART_DEBUG     0
 #endif
-/* 1: 云端 MQTT/连接 固定短日志（已稳定，默认关） */
+/* 1: 云端 MQTT/连接 固定短日志 */
 #ifndef APP_CLOUD_TRACE
 #define APP_CLOUD_TRACE          0
 #endif

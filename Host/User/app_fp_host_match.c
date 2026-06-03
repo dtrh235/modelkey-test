@@ -12,11 +12,12 @@
 #include "app_state.h"
 #include "app_screen.h"
 #include "app_user_ops.h"
+#include "app_ccm_ram.h"
 
 extern uint8_t g_fp_hw_inited;
 extern uint8_t g_screen8_fp_enroll_state;
 
-static uint8_t  s_feat_asm[AS608_TEMPLATE_SIZE];
+static uint8_t  APP_CCM_DATA s_feat_asm[AS608_TEMPLATE_SIZE];
 static uint8_t  s_feat_mask;
 static uint16_t s_feat_seq = 0xFFFFu;
 

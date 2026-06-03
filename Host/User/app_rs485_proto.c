@@ -3,6 +3,7 @@
 #if (APP_RS485_ENABLE == 1)
 
 #include <string.h>
+#include <stdio.h>
 
 #include "app_host_diag.h"
 #include "app_rs485_link.h"
@@ -195,6 +196,31 @@ static const char *rs485_unlock_method_name(uint8_t method_id)
     return "password";
 }
 
+#ifndef APP_HOST_SLAVE_UNLOCK_DEDUP_MS
+#define APP_HOST_SLAVE_UNLOCK_DEDUP_MS  3000u
+#endif
+
+static uint8_t host_rs485_slave_unlock_is_duplicate(const char *acc, uint8_t mid)
+{
+    static char s_dedup_acc[13];
+    static uint8_t s_dedup_mid;
+    static uint32_t s_dedup_ms;
+    uint32_t now = HAL_GetTick();
+
+    if(acc == NULL) {
+        return 0u;
+    }
+    if(strcmp(acc, s_dedup_acc) == 0 && mid == s_dedup_mid &&
+       (uint32_t)(now - s_dedup_ms) < APP_HOST_SLAVE_UNLOCK_DEDUP_MS) {
+        return 1u;
+    }
+    strncpy(s_dedup_acc, acc, sizeof(s_dedup_acc) - 1u);
+    s_dedup_acc[sizeof(s_dedup_acc) - 1u] = '\0';
+    s_dedup_mid = mid;
+    s_dedup_ms = now;
+    return 0u;
+}
+
 static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t plen)
 {
     char acc[13];
@@ -203,6 +229,7 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
     const char *mtd;
 
     if(pl == NULL) {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx reject null pl\r\n");
         return;
     }
     memset(acc, 0, sizeof(acc));
@@ -217,6 +244,8 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
         device_id = CLOUD_UNLOCK_DEVICE_SLAVE;
         memcpy(acc, pl + 1u, 12u);
     } else {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx reject plen=%u (want 14/15)\r\n",
+                              (unsigned)plen);
         return;
     }
     acc[12] = '\0';
@@ -224,6 +253,8 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
         device_id = CLOUD_UNLOCK_DEVICE_SLAVE;
     }
     if(mid < 1u || mid > 3u) {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx reject mid=%u plen=%u acc=%s\r\n",
+                              (unsigned)mid, (unsigned)plen, acc);
         return;
     }
     {
@@ -233,13 +264,19 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
                 break;
             }
             if(acc[i] < 0x20u || acc[i] > 0x7Eu) {
+                HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx reject bad acc char plen=%u\r\n",
+                                      (unsigned)plen);
                 return;
             }
         }
     }
     mtd = rs485_unlock_method_name(mid);
-    HOST_RS485_LOG("[RS485] SLAVE_UNLOCK_NOTIFY acc=%s method=%s device=%d -> Aliyun\r\n",
-                   acc, mtd, device_id);
+    if(host_rs485_slave_unlock_is_duplicate(acc, mid) != 0u) {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx dedup skip acc=%s mtd=%s\r\n", acc, mtd);
+        return;
+    }
+    HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx acc=%s mtd=%s dev=%d plen=%u -> cloud\r\n",
+                          acc, mtd, device_id, (unsigned)plen);
     cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, acc);
     cloud_ota_service_report_unlock_record_ex(acc, mtd, HAL_GetTick(), device_id);
 }
@@ -662,10 +699,16 @@ void app_rs485_master_poll_incoming(uint32_t read_tout_ms)
         }
     } else if(cmd == RS485_CMD_SLAVE_UNLOCK_NOTIFY &&
               (plen == 14u || plen == (uint16_t)sizeof(rs485_unlock_notify_t))) {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] host poll rx 0x10 plen=%u seq=%u\r\n",
+                              (unsigned)plen, (unsigned)seq);
         host_rs485_slave_unlock_forward_cloud(pl, plen);
         if(!rs485_send_reply(seq, (uint8_t)(RS485_CMD_SLAVE_UNLOCK_NOTIFY | 0x80u), 0u)) {
+            HOST_UNLOCK_CLOUD_LOG("[UNLOCK] host poll 0x10 ACK tx fail\r\n");
             HOST_RS485_LOG("[RS485] unlock ACK tx fail\r\n");
         }
+    } else if(cmd == RS485_CMD_SLAVE_UNLOCK_NOTIFY) {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] host poll 0x10 bad plen=%u seq=%u\r\n",
+                              (unsigned)plen, (unsigned)seq);
     } else if(cmd == RS485_CMD_FP_MATCH_CHAR && plen == (uint16_t)sizeof(rs485_fp_char_chunk_t)) {
         const rs485_fp_char_chunk_t *ch = (const rs485_fp_char_chunk_t *)pl;
         rs485_fp_match_rsp_t mrsp;

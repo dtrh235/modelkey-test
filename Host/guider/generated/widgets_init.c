@@ -32,6 +32,9 @@ __attribute__((unused)) void ta_event_cb (lv_event_t *e) {
     lv_obj_t *ta = lv_event_get_target(e);
 #endif
     lv_obj_t *kb = lv_event_get_user_data(e);
+    if(kb == NULL || !lv_obj_is_valid(kb)) {
+        return;
+    }
     if (code == LV_EVENT_FOCUSED || code == LV_EVENT_CLICKED)
     {
 #if LV_USE_ZH_KEYBOARD != 0
@@ -103,10 +106,11 @@ void screen_digital_clock_1_timer(lv_timer_t *timer)
     } else {
         clock_count_24(&screen_digital_clock_1_hour_value, &screen_digital_clock_1_min_value, &screen_digital_clock_1_sec_value);
     }
-    if (lv_obj_is_valid(guider_ui.screen_digital_clock_1) &&
-        lv_obj_get_screen(guider_ui.screen_digital_clock_1) == guider_ui.screen)
-    {
-        lv_dclock_set_text_fmt(guider_ui.screen_digital_clock_1, "%d:%02d", screen_digital_clock_1_hour_value, screen_digital_clock_1_min_value);
+    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1) &&
+       lv_obj_get_screen(guider_ui.screen_digital_clock_1) == guider_ui.screen) {
+        lv_dclock_set_text_fmt(guider_ui.screen_digital_clock_1, "%d:%02d",
+                               screen_digital_clock_1_hour_value,
+                               screen_digital_clock_1_min_value);
     }
 }
 static lv_obj_t * screen_datetext_1_calendar;

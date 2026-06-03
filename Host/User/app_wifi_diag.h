@@ -28,11 +28,21 @@ void time_trace_tx(const char *s);
 #else
 #define TIME_TRACE_MSG(s)   ((void)0)
 #endif
-#if (APP_CLOUD_TRACE != 0)
+#if (APP_CLOUD_TRACE != 0) || (APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE != 0)
 void cloud_trace_tx(const char *s);
+#endif
+#if (APP_CLOUD_TRACE != 0)
 #define CLOUD_TRACE_MSG(s)  cloud_trace_tx(s)
 #else
 #define CLOUD_TRACE_MSG(s)  ((void)0)
+#endif
+#ifndef APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE
+#define APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE 0
+#endif
+#if (APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE != 0)
+#define UNLOCK_CLOUD_TRACE_MSG(s)  cloud_trace_tx(s)
+#else
+#define UNLOCK_CLOUD_TRACE_MSG(s)  ((void)0)
 #endif
 
 #endif

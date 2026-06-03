@@ -6,6 +6,10 @@
 
 void app_home_wall_clock_set(int year, int month, int day, int hour, int min, int sec);
 void app_home_wall_clock_refresh_ui(void);
+/* CloudTask 不得直接调 LVGL；仅更新墙钟数据，UI 在 GuiTask 刷新 */
+void app_wall_clock_schedule_home_ui(int year, int month, int day, int hour, int min, int sec);
+void app_wall_clock_schedule_ui_refresh(void);
+void app_wall_clock_gui_poll(void);
 uint8_t app_wall_clock_valid(void);
 uint32_t app_wall_clock_epoch_sec(void);
 void app_wall_clock_on_set(int year, int month, int day, int hour, int min, int sec);

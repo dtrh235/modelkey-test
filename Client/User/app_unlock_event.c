@@ -83,17 +83,13 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
     /* 硬件开锁先走；RS485 上报等主机侧校时窗口后再发（与主机开锁记录策略一致） */
     app_unlock_uart4_on_unlock_ok(account, method);
     if(app_slave_host_time_ready() != 0u) {
-#if (APP_SLAVE_USART1_DEBUG != 0)
-        SLAVE_DBG_LOG("[SLV][UNLOCK] rs485 notify now acc=%s mtd=%s",
-                      account, method);
-#endif
+        SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] acc=%s mtd=%s -> rs485 now",
+                               account, method);
         app_rs485_slave_unlock_notify_async(account, unlock_method_to_id(method));
     } else {
-#if (APP_SLAVE_USART1_DEBUG != 0)
-        SLAVE_DBG_LOG("[SLV][UNLOCK] rs485 queued acc=%s mtd=%s wait_ms=%lu",
-                      account, method,
-                      (unsigned long)app_slave_host_time_ms_until_ready());
-#endif
+        SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] acc=%s mtd=%s -> rs485 queue wait_ms=%lu",
+                               account, method,
+                               (unsigned long)app_slave_host_time_ms_until_ready());
         app_slave_unlock_queue_push(account, unlock_method_to_id(method));
     }
 #if (APP_USE_FREERTOS == 1)

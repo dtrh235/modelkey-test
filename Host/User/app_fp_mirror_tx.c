@@ -19,6 +19,7 @@ extern char g_default_admin_account[13];
 #include "app_home_fp_poll.h"
 #include "app_config.h"
 #include "app_state.h"
+#include "app_ccm_ram.h"
 #if (APP_USE_FREERTOS == 1)
 #include "FreeRTOS.h"
 #include "task.h"
@@ -38,13 +39,13 @@ static uint8_t s_fp_q_cnt;
 static fp_tx_state_t s_fp_tx_state;
 static uint8_t s_fp_mirror_ping_done;
 static uint16_t s_fp_tx_page;
-static uint8_t s_fp_tx_tpl[AS608_TEMPLATE_SIZE];
+static uint8_t APP_CCM_DATA s_fp_tx_tpl[AS608_TEMPLATE_SIZE];
 static uint8_t s_fp_tx_chunk;
 static uint8_t s_fp_tpl_ready;
 static uint32_t s_fp_rs485_backoff_until_ms;
 static uint32_t s_fp_as608_backoff_until_ms;
 static uint32_t s_fp_next_page_after_ms;
-static uint32_t s_fp_page_done_ms[300];
+static uint32_t APP_CCM_DATA s_fp_page_done_ms[300];
 static uint8_t s_fp_wait_commit;
 static uint8_t s_fp_rs485_fail_streak;
 static uint32_t s_fp_wait_commit_log_ms;

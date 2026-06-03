@@ -17,9 +17,11 @@
 #include "app_slave_diag.h"
 
 #if (APP_SLAVE_USART1_DEBUG != 0)
-#define APP_UNLOCK_LOG(fmt, ...) SLAVE_DBG_LOG("[SLV][NFC] " fmt, __VA_ARGS__)
+#define APP_UNLOCK_LOG(...) SLAVE_DBG_LOG("[SLV][NFC] " __VA_ARGS__)
+#elif (APP_SLAVE_NFC_UNLOCK_TRACE != 0)
+#define APP_UNLOCK_LOG(...) SLAVE_NFC_LOG(__VA_ARGS__)
 #else
-#define APP_UNLOCK_LOG(fmt, ...) ((void)0)
+#define APP_UNLOCK_LOG(...) ((void)0)
 #endif
 
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_20);
@@ -238,15 +240,37 @@ void app_home_nfc_poll_handle(void)
     const char *unlock_acc = "";
     int idx;
     uint8_t got_card;
-#if (APP_SLAVE_USART1_DEBUG != 0)
+#if (APP_SLAVE_USART1_DEBUG != 0) || (APP_SLAVE_NFC_UNLOCK_TRACE != 0)
     static uint32_t s_last_alive_log = 0u;
 #endif
     static uint32_t s_last_health_check = 0u;
 
 #if APP_RS485_IS_SLAVE
-    if(g_app_scr != APP_SCR_1) return;
-    if(now < s_nfc_match_cooldown_until) return;
-    if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) return;
+    if(g_app_scr != APP_SCR_1) {
+        static uint8_t s_log_scr;
+        if(s_log_scr != (uint8_t)g_app_scr) {
+            s_log_scr = (uint8_t)g_app_scr;
+            APP_UNLOCK_LOG("skip scr=%u (need scr1)", (unsigned)g_app_scr);
+        }
+        return;
+    }
+    if(now < s_nfc_match_cooldown_until) {
+        static uint32_t s_log_cd_ms;
+        if((now - s_log_cd_ms) >= 3000u) {
+            s_log_cd_ms = now;
+            APP_UNLOCK_LOG("skip cooldown left_ms=%lu",
+                           (unsigned long)(s_nfc_match_cooldown_until - now));
+        }
+        return;
+    }
+    if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
+        static uint32_t s_log_pop_ms;
+        if((now - s_log_pop_ms) >= 3000u) {
+            s_log_pop_ms = now;
+            APP_UNLOCK_LOG("skip unlock popup visible");
+        }
+        return;
+    }
 #else
     if(g_app_scr != APP_SCR_HOME) return;
 #endif
@@ -258,7 +282,11 @@ void app_home_nfc_poll_handle(void)
     if(!app_nfc_hw_ready()) {
         app_nfc_hw_init_once();
         if(!app_nfc_hw_ready()) {
-            APP_UNLOCK_LOG("hw not ready reset_ret=%u", (unsigned)app_nfc_last_reset_ret());
+            static uint32_t s_log_hw_ms;
+            if((now - s_log_hw_ms) >= 5000u) {
+                s_log_hw_ms = now;
+                APP_UNLOCK_LOG("hw not ready reset_ret=%u", (unsigned)app_nfc_last_reset_ret());
+            }
             return;
         }
     }
@@ -280,8 +308,8 @@ void app_home_nfc_poll_handle(void)
         }
     }
 
-#if (APP_SLAVE_USART1_DEBUG != 0)
-    if((now - s_last_alive_log) >= 5000u) {
+#if (APP_SLAVE_USART1_DEBUG != 0) || (APP_SLAVE_NFC_UNLOCK_TRACE != 0)
+    if((now - s_last_alive_log) >= 10000u) {
         s_last_alive_log = now;
         APP_UNLOCK_LOG("poll alive ready=%u users=%u admin_nfc=%u",
                        (unsigned)app_nfc_hw_ready(),
@@ -345,6 +373,8 @@ void app_home_nfc_poll_handle(void)
             s_nfc_hit = 1u;
         }
         if(s_nfc_hit < (uint8_t)APP_NFC_UNLOCK_CONFIRM_CNT) {
+            APP_UNLOCK_LOG("uid confirm %u/%u",
+                           (unsigned)s_nfc_hit, (unsigned)APP_NFC_UNLOCK_CONFIRM_CNT);
             return;
         }
         s_nfc_hit = 0u;

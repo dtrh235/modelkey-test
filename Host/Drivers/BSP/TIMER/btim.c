@@ -73,6 +73,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == BTIM_TIMX_INT)
     {
-        lv_tick_inc(1);  //进入中断的ms数要和本函数的输入参数相同
+#if !LV_TICK_CUSTOM
+        lv_tick_inc(1);  /* 周期须与本定时器 1ms 一致 */
+#endif
     }
 }

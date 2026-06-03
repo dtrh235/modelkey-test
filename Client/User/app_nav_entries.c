@@ -103,6 +103,7 @@ void enter_screen_1(void)
     ui_nav_ops_t ops = build_nav_ops();
     ui_nav_enter_screen_1(&ctx, &ops);
     app_slave_ui_hide_corner_ok_esc();
+    app_slave_ui_sanitize_screen1_textareas();
     screen1_set_field_selected(0);
     screen1_hide_error_label();
     if(lv_obj_is_valid(guider_ui.screen_1_ta_2)) {

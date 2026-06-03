@@ -4,6 +4,7 @@
 
 #include "./SYSTEM/sys/sys.h"
 #include "app_config.h"
+#include "app_ccm_ram.h"
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER && defined(APP_HOST_RS485_DIAG) && (APP_HOST_RS485_DIAG != 0)
 #include "app_host_diag.h"
 #endif
@@ -17,7 +18,7 @@ static UART_HandleTypeDef s_huart6;
 static uint8_t s_rs485_inited;
 static volatile uint16_t s_rx_head;
 static volatile uint16_t s_rx_tail;
-static uint8_t s_rx_ring[RS485_RX_RING_SZ];
+static uint8_t APP_CCM_DATA s_rx_ring[RS485_RX_RING_SZ];
 
 static void rs485_rx_ring_push(uint8_t b)
 {

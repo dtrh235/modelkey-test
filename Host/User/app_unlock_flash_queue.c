@@ -191,9 +191,9 @@ uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *c
     (void)snprintf(payload, sizeof(payload),
                    "{\"method\":\"thing.event.property.post\",\"id\":%lu,"
                    "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%s\","
-                   "\"unlock_method\":%u},\"version\":\"1.0\"}",
+                   "\"unlock_method\":%u,\"unlock_device\":%u},\"version\":\"1.0\"}",
                    (unsigned long)rec.seq, rec.account, time_txt,
-                   (unsigned)rec.method_code);
+                   (unsigned)rec.method_code, (unsigned)rec.device_code);
     rc = publish_fn(payload, ctx);
     if(rc == 0) {
         WIFI_DBG("unlock flash pub fail seq=%lu", (unsigned long)rec.seq);

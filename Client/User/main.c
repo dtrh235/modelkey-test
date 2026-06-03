@@ -60,7 +60,7 @@
 #define APP_TASK_STACK_RS485   512u
 #define APP_TASK_STACK_FP      1280u
 #define APP_TASK_STACK_NFC     768u
-#define APP_TASK_STACK_GUI     1024u
+#define APP_TASK_STACK_GUI     2048u
 
 #if (APP_USE_FREERTOS == 1)
 void vApplicationTickHook(void)
