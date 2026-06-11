@@ -58,7 +58,6 @@ void ui_nav_enter_screen_4(ui_nav_ctx_t *ctx, const ui_nav_ops_t *ops)
     ui_load_scr_animation(ctx->ui, &ctx->ui->screen_4, ctx->ui->screen_4_del, &ctx->ui->screen_3_del,
                           setup_scr_screen_4, LV_SCR_LOAD_ANIM_NONE, 0, 0, false, true);
     *ctx->app_scr = APP_SCR_4;
-    if(ops != NULL && ops->screen4_refresh_table != NULL) ops->screen4_refresh_table();
     if(ctx->screen4_need_init != NULL) *ctx->screen4_need_init = 1u;
 }
 

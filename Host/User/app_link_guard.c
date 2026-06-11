@@ -64,7 +64,7 @@ void app_link_guard_wifi_end(uint8_t ok)
 void app_link_guard_mqtt_begin(void)
 {
     if(s_phase == APP_LINK_GUARD_WIFI) {
-        return;
+        s_phase = APP_LINK_GUARD_NONE;
     }
     if(s_phase == APP_LINK_GUARD_MQTT) {
         return;

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>用户协议 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+const fromLogin = jzQuery('from') === 'login';
+initSettingsPage('用户协议', fromLogin ? 'login.html' : 'profile.html', `
+  <div class="bg-white rounded-2xl p-4 shadow-card text-sm text-slate-600 space-y-3 border border-slate-50">
+    <p><strong class="text-ycu-navy">一、服务说明</strong><br>Joyful Zone 为宜春学院智能门禁配套 App，用于远程开锁、记录查询与设备管理。</p>
+    <p><strong class="text-ycu-navy">二、隐私</strong><br>开锁记录与账号信息仅用于门禁安全管理，不会向第三方出售。</p>
+    <p><strong class="text-ycu-navy">三、安全责任</strong><br>请妥善保管手机与登录验证码，远程开锁需长按确认以防误触。</p>
+  </div>
+`, fromLogin ? { backAnchor: 'fixed' } : { backAnchor: 'profile' });
+</script>
+</body>
+</html>

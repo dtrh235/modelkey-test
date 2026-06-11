@@ -34,6 +34,7 @@ bool app_rs485_proto_slave_unlock_notify(const char *acc, uint8_t method_id, uin
 #if APP_RS485_IS_SLAVE
 /* 从机开锁后异步上报主机，不阻塞 NfcTask（原同步 notify 可卡 280ms）。 */
 void app_rs485_slave_unlock_notify_async(const char *acc, uint8_t method_id);
+void app_rs485_slave_lockout_alert_async(const char *last_acc);
 void app_rs485_slave_flush_pending_notify(void);
 void app_rs485_slave_upkeep_mirror_request(void);
 bool app_rs485_proto_slave_fp_template_commit(uint16_t page_id, uint8_t status, uint32_t tout_ms);

@@ -42,6 +42,8 @@
 #include "app_screen5_flow.h"
 #include "app_screen_wifi_flow.h"
 #include "app_screen3_menu.h"
+#include "app_screen_pair_flow.h"
+#include "app_pair_bind.h"
 #include "app_screen4_table.h"
 #include "app_screen8_focus.h"
 #include "app_screen6_info.h"

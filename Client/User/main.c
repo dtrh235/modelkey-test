@@ -23,7 +23,9 @@
 #include "app_iwdg.h"
 #include "app_slave_diag.h"
 #include "app_unlock_uart4.h"
+#include "app_temp_password.h"
 #include "app_unlock_event.h"
+#include "app_screen_auth.h"
 #include "app_nfc_hw.h"
 #include "app_user_ops.h"
 #if (APP_RS485_ENABLE == 1)
@@ -158,6 +160,7 @@ static void app_gui_task(void *argument)
         app_touch_ui_handle();
 #endif
         screen1_cursor_blink_handle();
+        screen1_lockout_poll();
 #if !APP_RS485_IS_SLAVE
         screen2_cursor_blink_handle();
         screen5_cursor_blink_handle();
@@ -253,6 +256,7 @@ static void app_rs485_slave_task(void *argument)
 {
     (void)argument;
     for(;;) {
+        app_temp_password_tick();
         app_rs485_slave_server_poll(APP_RS485_SLAVE_LISTEN_MS);
         app_rs485_slave_upkeep_mirror_request();
         app_rs485_slave_flush_pending_notify();
@@ -382,6 +386,7 @@ int main(void)
     }
     app_iwdg_feed();
     app_unlock_uart4_init();            /* UART4 解锁成功发送 '1' */
+    app_temp_password_init();
 
     /* MFRC522 必须做一次软复位才能进入正常读卡状态；否则首页"刷卡"读不到 UID。
      * 之前只在录入页才走 init_once（含 Reset），所以重启回到首页直接刷卡无法解锁。 */

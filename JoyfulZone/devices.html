@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设备管理 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  function devicesBodyHtml() {
+    return `
+      ${renderPageDesc('点击设备卡片，可管理 WiFi 与手机绑定。')}
+      ${jzDeviceBindInfo() ? renderDeviceCardLarge() : renderDevicesEmptyHint()}
+      <a href="${jzHref('add_device.html', 'devices')}" class="flex items-center justify-center gap-2 w-full py-3.5 rounded-2xl border-2 border-dashed border-ycu-teal/35 text-ycu-teal-dark text-sm font-semibold bg-white/80 shadow-card">
+        <i class="fa-solid fa-plus"></i> 添加设备
+      </a>`;
+  }
+
+  function paintDevices() {
+    const scroll = document.getElementById('devicesScroll');
+    if (scroll) scroll.innerHTML = devicesBodyHtml();
+  }
+
+  initAndroidPhone(`
+    ${renderTabTopBar('设备管理')}
+    <div id="devicesScroll" class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
+      ${devicesBodyHtml()}
+    </div>
+    ${renderBottomNav('devices')}
+  `, { fullBleed: true });
+
+  async function refreshDevices() {
+    const sync = await jzSyncDeviceBindStatus();
+    paintDevices();
+    if (sync.cleared) {
+      showToast('设备绑定已失效，请重新配对', 'error');
+    }
+  }
+
+  jzInitTabScroll('devicesScroll', {
+    onRefresh: refreshDevices,
+  });
+
+  jzWatchPageRefresh({
+    onResume: refreshDevices,
+    onBindChange: () => {
+      paintDevices();
+    },
+    adaptivePresence: true,
+    onPoll: refreshDevices,
+  });
+});
+</script>
+</body>
+</html>

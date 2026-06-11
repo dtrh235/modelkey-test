@@ -11,6 +11,7 @@
 #include "app_home_nav_btns.h"
 #include "app_screen_auth.h"
 #include "app_screen3_menu.h"
+#include "app_screen_pair_flow.h"
 #include "ui_menu_popup_utils.h"
 #include "app_screen4_table.h"
 #include "app_screen6_info.h"
@@ -202,22 +203,32 @@ static void app_touch_auth_screen(lv_coord_t x, lv_coord_t y,
 
 static void app_touch_screen3(lv_coord_t x, lv_coord_t y)
 {
-    lv_obj_t *items[SCREEN3_MENU_ITEM_COUNT] = {
-        guider_ui.screen_3_btn_3,
-        guider_ui.screen_3_btn_4,
-        guider_ui.screen_3_btn_5,
-        guider_ui.screen_3_btn_6,
-        guider_ui.screen_3_btn_7
-    };
     uint8_t i;
+    lv_obj_t *item;
 
     if(app_touch_hit(guider_ui.screen_3_btn_1, x, y)) {
         app_touch_key_once(KEY_ESC);
         return;
     }
 
+    if(screen_pair_is_open()) {
+        if(screen_pair_hit_regen(x, y)) {
+            screen_pair_on_regen();
+            app_touch_reset_slot();
+            return;
+        }
+        app_touch_reset_slot();
+        return;
+    }
+
+    if(s_touch_move_total >= (lv_coord_t)APP_TOUCH_LIST_SCROLL_THRESH) {
+        app_touch_reset_slot();
+        return;
+    }
+
     for(i = 0u; i < SCREEN3_MENU_ITEM_COUNT; i++) {
-        if(app_touch_hit(items[i], x, y)) {
+        item = screen3_menu_btn_by_index(i);
+        if(app_touch_hit(item, x, y)) {
             app_touch_two_tap(i, g_screen3_menu_index, screen3_set_menu_selected, i);
             return;
         }
@@ -522,6 +533,9 @@ static void app_touch_process_release(lv_coord_t x, lv_coord_t y)
         if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
             return;
         }
+        if(screen1_is_lockout_active() != 0u) {
+            return;
+        }
         if(lv_scr_act() != guider_ui.screen_1) {
             return;
         }
@@ -688,6 +702,13 @@ void app_touch_ui_handle(void)
                 s_touch_move_total = (lv_coord_t)(s_touch_move_total + dx + dy);
                 if(s_touch_move_total >= (lv_coord_t)APP_TOUCH_LIST_SCROLL_THRESH) {
                     screen4_list_scroll_by(cy - s_touch_last_y);
+                }
+            } else if(g_app_scr == APP_SCR_3 && lv_scr_act() == guider_ui.screen_3 &&
+                      !screen_pair_is_open() &&
+                      screen3_point_in_menu_panel(cx, cy) != 0u) {
+                s_touch_move_total = (lv_coord_t)(s_touch_move_total + dx + dy);
+                if(s_touch_move_total >= (lv_coord_t)APP_TOUCH_LIST_SCROLL_THRESH) {
+                    screen3_list_scroll_by(s_touch_last_y - cy);
                 }
             }
             s_touch_last_x = cx;

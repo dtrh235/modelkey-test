@@ -26,6 +26,7 @@ bool admin_credentials_match(const char *acc, const char *pwd);
 bool unlock_credentials_match(const char *acc, const char *pwd);
 bool users_try_register(const char *acc, const char *pwd, bool is_admin);
 bool users_try_delete_by_acc(const char *acc);
+bool users_set_password_by_acc(const char *acc, const char *pwd);
 uint8_t users_admin_count(void);
 uint8_t users_migrate_default_admin_to_users(void);
 /* 1=存在至少一个可登录的管理员（Flash 用户表或旧版虚拟默认槽） */

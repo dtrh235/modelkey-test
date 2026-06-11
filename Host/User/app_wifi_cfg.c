@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "app_wifi_remember.h"
+#include "app_pair_bind.h"
 
 #define APP_WIFI_SSID_MAX   32u
 #define APP_WIFI_PWD_MAX    64u
@@ -46,6 +47,7 @@ void app_wifi_cfg_init_defaults(void)
     s_wifi_ssid[0] = '\0';
     s_wifi_pwd[0] = '\0';
     app_wifi_remember_init();
+    app_pair_bind_init();
     (void)app_wifi_remember_load_primary(s_wifi_ssid, (uint16_t)sizeof(s_wifi_ssid),
                                          s_wifi_pwd, (uint16_t)sizeof(s_wifi_pwd));
     s_wifi_inited = 1u;

@@ -66,6 +66,10 @@ static void app_key_ui_screen1(KeyValue_t key)
         SLAVE_KEY_LOG("[SLV][KEY] skip: unlock popup showing");
         return;
     }
+    if(screen1_is_lockout_active() != 0u) {
+        SLAVE_KEY_LOG("[SLV][KEY] skip: lockout active");
+        return;
+    }
     if(key == KEY_ESC) {
         app_iwdg_feed();
         screen1_clear_auth_inputs();
@@ -80,15 +84,16 @@ static void app_key_ui_screen1(KeyValue_t key)
                       (acc != NULL) ? acc : "",
                       (unsigned)((pwd != NULL) ? strlen(pwd) : 0u));
         app_iwdg_feed();
-        if(unlock_credentials_match_with_delete(acc, pwd)) {
+        {
+            uint8_t auth_r = screen1_try_password_unlock();
             app_iwdg_feed();
-            screen1_hide_error_label();
-            app_unlock_event_handle_success(APP_UNLOCK_POPUP_SCREEN1, acc, "password");
-            SLAVE_KEY_LOG("[SLV][KEY] OK auth PASS");
-        } else {
-            app_iwdg_feed();
-            screen1_show_error_label();
-            SLAVE_KEY_LOG("[SLV][KEY] OK auth FAIL");
+            if(auth_r == 1u) {
+                SLAVE_KEY_LOG("[SLV][KEY] OK auth PASS");
+            } else if(auth_r == 2u) {
+                SLAVE_KEY_LOG("[SLV][KEY] OK auth LOCKOUT");
+            } else {
+                SLAVE_KEY_LOG("[SLV][KEY] OK auth FAIL");
+            }
         }
     } else if(key == KEY_UP && g_screen1_field_index > 0u) {
         app_iwdg_feed();

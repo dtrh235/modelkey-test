@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>远程开锁 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+  <style>
+    @keyframes unlock-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(46,184,168,.35); }
+      50% { box-shadow: 0 0 0 14px rgba(46,184,168,0); }
+    }
+    #holdBtn:active { animation: none; }
+    .unlock-idle #holdBtn { animation: unlock-pulse 2.5s ease-in-out infinite; }
+  </style>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  const backUrl = jzResolveBack('home.html');
+  const s = jzLoadSettings();
+  const authTip = s.unlockSecondAuth
+    ? '<p class="text-xs text-ycu-teal-dark mt-1"><i class="fa-solid fa-shield-halved mr-1"></i>已开启二次验证</p>'
+    : '';
+
+  initAndroidPhone(`
+    ${renderTopAppBar('远程开锁', { back: backUrl })}
+    <div class="flex-1 flex flex-col items-center px-6 pt-5 bg-ycu-surface unlock-idle" id="unlockPage">
+      <a href="${jzHref('device_detail.html', 'unlock')}" class="w-full bg-white rounded-2xl overflow-hidden shadow-card mb-5 flex items-stretch border border-slate-50 active:scale-[0.99] transition-transform">
+        ${renderLockImage('w-24 h-24 flex-shrink-0 rounded-2xl')}
+        <div class="flex-1 p-4 flex flex-col justify-center min-w-0">
+          <p class="font-semibold text-ycu-navy">实验室智能门锁</p>
+          ${jzUnlockPresenceLineHtml()}
+          ${authTip}
+        </div>
+        <i class="fa-solid fa-chevron-right text-slate-300 text-sm self-center pr-4"></i>
+      </a>
+
+      ${renderUnlockHoldButton()}
+      <p id="unlockOfflineHint" class="text-xs text-slate-400 mt-3 text-center hidden">门锁云端未连接，无法远程开锁</p>
+
+      <div class="mt-6 grid grid-cols-2 gap-3 w-full max-w-xs">
+        <div class="bg-white rounded-xl p-3.5 text-center shadow-card border border-slate-50">
+          <i class="fa-solid fa-shield-halved text-ycu-teal-dark text-lg mb-1.5 block"></i>
+          <span class="text-sm text-slate-500">安全加密</span>
+        </div>
+        <div class="bg-white rounded-xl p-3.5 text-center shadow-card border border-slate-50">
+          <i class="fa-solid fa-clock text-ycu-blue text-lg mb-1.5 block"></i>
+          <span class="text-sm text-slate-500">5 秒自动上锁</span>
+        </div>
+      </div>
+      <a href="${jzHref('unlock_settings.html', 'unlock')}" class="text-xs text-ycu-teal-dark mt-4 font-medium">开锁设置 <i class="fa-solid fa-chevron-right text-[9px]"></i></a>
+    </div>
+  `, { fullBleed: true });
+
+  jzPaintUnlockPresence();
+
+  jzWatchPageRefresh({
+    onResume: async () => {
+      const sync = await jzSyncDeviceBindStatus();
+      jzPaintUnlockPresence();
+      if (sync.cleared || !jzDeviceBindInfo()) {
+        showToast('设备未绑定，无法远程开锁', 'error');
+      }
+    },
+    onBindChange: (d) => {
+      jzPaintUnlockPresence();
+      if (!d.bound && d.cleared) {
+        showToast('设备已断开，请重新绑定', 'error');
+      }
+    },
+    adaptivePresence: true,
+    onPoll: async () => {
+      await jzSyncDeviceBindStatus();
+      jzPaintUnlockPresence();
+    },
+  });
+
+  const page = document.getElementById('unlockPage');
+  const btn = document.getElementById('holdBtn');
+  btn.addEventListener('mousedown', () => page.classList.remove('unlock-idle'));
+  btn.addEventListener('touchstart', () => page.classList.remove('unlock-idle'), { passive: true });
+  btn.addEventListener('mouseup', () => setTimeout(() => page.classList.add('unlock-idle'), 300));
+  btn.addEventListener('touchend', () => setTimeout(() => page.classList.add('unlock-idle'), 300));
+
+  async function doUnlock(api) {
+    const r = await jzRemoteUnlock();
+    if (r.ok) {
+      if (api && api.finishSuccess) api.finishSuccess();
+    } else if (api && api.resetHold) {
+      api.resetHold();
+    }
+  }
+
+  bindUnlockLongPress({
+    duration: 2000,
+    onComplete(api) {
+      if (!jzDevicePresenceOnline()) {
+        showToast('门锁离线，请稍后再试', 'error');
+        if (api && api.resetHold) api.resetHold();
+        return;
+      }
+      const cfg = jzLoadSettings();
+      if (cfg.unlockSecondAuth && jzHasUnlockPin(cfg.unlockSecondPin)) {
+        jzShowSecondAuth(
+          () => { doUnlock(api); },
+          () => { if (api && api.resetHold) api.resetHold(); }
+        );
+      } else {
+        doUnlock(api);
+      }
+    },
+  });
+});
+</script>
+</body>
+</html>

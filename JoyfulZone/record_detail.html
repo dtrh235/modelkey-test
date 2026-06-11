@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>记录详情 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  const params = new URLSearchParams(location.search);
+  const id = params.get('id');
+  const raw = id ? await jzFetchUnlockRecordById(id) : null;
+
+  if (!raw) {
+    initSettingsPage('记录详情', jzResolveBack('records.html'), `
+      <div class="bg-white rounded-2xl p-8 shadow-card text-center text-slate-400 text-sm">记录不存在或已过期</div>
+    `);
+    return;
+  }
+
+  const v = jzRecordToView(raw);
+  const icon = lockMethodIcon(v.m);
+  const colorMap = { 密码: 'bg-amber-50 text-amber-600', NFC: 'bg-amber-50 text-amber-600', 指纹: 'bg-blue-50 text-ycu-blue', 远程: 'bg-ycu-teal-light text-ycu-teal-dark' };
+  const color = colorMap[v.m] || 'bg-slate-100 text-slate-500';
+  const result = v.ok ? '成功' : '失败';
+  const timeFull = raw.unlockTime || v.t;
+
+  initSettingsPage('记录详情', jzResolveBack('records.html'), `
+    <div class="bg-white rounded-2xl p-5 shadow-card-lg text-center border border-slate-50">
+      <div class="w-16 h-16 rounded-2xl ${color} flex items-center justify-center mx-auto text-2xl"><i class="fa-solid ${icon}"></i></div>
+      <h2 class="text-xl font-bold text-ycu-navy mt-4 font-mono tracking-wider">账号 ${v.u}</h2>
+      <p class="text-sm text-slate-500 mt-1 whitespace-nowrap">${v.m}开锁 · ${result}</p>
+      <span class="inline-block mt-3 px-3 py-1 rounded-full ${v.ok ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'} text-xs font-semibold">${result}</span>
+    </div>
+    ${renderSettingsGroup([
+      ['#', 'fa-clock', '开锁时间', timeFull, null],
+      ['#', 'fa-location-dot', '开锁位置', v.d, null],
+      ['#', 'fa-key', '开锁方式', v.m, null],
+      [jzHref('device_detail.html', 'record_detail'), 'fa-door-closed', '关联设备', '实验室智能门锁', null],
+    ])}
+  `);
+});
+</script>
+</body>
+</html>

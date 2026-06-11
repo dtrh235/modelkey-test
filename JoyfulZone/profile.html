@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人中心 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const s = jzLoadSettings();
+  const secondLabel = s.unlockSecondAuth ? '已开启二次验证' : '未开启';
+  const activeTp = jzPruneTempPasswords(s.tempPasswords).length;
+  const unreadNotify = jzNotifyUnreadCount();
+
+  initAndroidPhone(`
+    <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+      <div id="profileScroll" class="flex-1 min-h-0 overflow-y-auto">
+        <div class="bg-gradient-to-br from-ycu-teal-light via-white to-ycu-mint/50 pb-4">
+          <div class="px-5 pt-3 flex items-center gap-4">
+            ${renderAvatarLink('avatar_picker.html', 'w-16 h-16', 'ring-2 ring-ycu-teal/30 shadow-card', 'profile')}
+            <div class="flex-1">
+              <h2 class="text-lg font-bold text-ycu-navy">账号 ${jzAppLoginAccount()}</h2>
+              <p class="text-slate-400 text-xs mt-0.5">原型模式 · 未连接后端</p>
+              <a href="devices.html" class="inline-flex items-center gap-1 mt-1 text-[11px] text-ycu-teal-dark font-medium">已绑定 1 台设备 <i class="fa-solid fa-chevron-right text-[8px]"></i></a>
+            </div>
+            <a href="${jzHref('security.html', 'profile')}" class="text-xs text-ycu-teal-dark font-medium">账号</a>
+          </div>
+        </div>
+        <div class="px-4 py-4 space-y-4 -mt-2">
+      <p class="text-xs font-semibold text-slate-400 px-1 tracking-wide">开锁与安全</p>
+      ${renderSettingsGroup([
+        [jzHref('unlock_settings.html', 'profile'), 'fa-lock-open', '远程开锁设置', secondLabel, null],
+        [jzHref('temp_password.html', 'profile'), 'fa-key', '临时密码', activeTp ? `${activeTp} 个有效` : '访客一次性通行', null, 'profileTpBadge'],
+        [jzHref('security.html', 'profile'), 'fa-shield-halved', '账号与安全', '手机号、登录密码', null],
+      ])}
+      <p class="text-xs font-semibold text-slate-400 px-1 tracking-wide">个性化</p>
+      ${renderSettingsGroup([
+        [jzHref('avatar_picker.html', 'profile'), 'fa-image-portrait', '更换头像', `头像 ${s.avatar + 1}`, null],
+        [jzHref('theme.html', 'profile'), 'fa-palette', '主题与显示', jzUiModeLabel(s.uiMode), null],
+        [jzHref('notify_settings.html', 'profile'), 'fa-bell', '消息通知', '开锁提醒、告警推送', unreadNotify ? `${unreadNotify}条未读` : null, 'profileNotifyBadge'],
+        [jzHref('family.html', 'profile'), 'fa-users', '家庭成员', '共享门锁权限', null],
+      ])}
+      ${renderSettingsGroup([
+        [jzHref('help.html', 'profile'), 'fa-circle-question', '帮助与反馈', null, null],
+        [jzHref('agreement.html', 'profile'), 'fa-file-contract', '用户协议与隐私', null, null],
+        [jzHref('about.html', 'profile'), 'fa-circle-info', '关于 Joyful Zone', 'v1.0.0', null],
+      ])}
+          <a href="login.html" class="block text-center py-3.5 rounded-2xl bg-white text-ycu-sun text-sm font-semibold shadow-card border border-orange-100">退出登录</a>
+        </div>
+      </div>
+      ${renderBottomNav('profile')}
+    </div>
+  `, { fullBleed: true });
+
+  async function refreshProfileBadges() {
+    await jzFetchNotifications({ baseline: false });
+    const tpList = await jzFetchTempPasswords();
+    const unread = jzNotifyUnreadCount();
+    const tpEl = document.getElementById('profileTpBadge');
+    const notifyEl = document.getElementById('profileNotifyBadge');
+    if (tpEl) tpEl.textContent = tpList.length ? `${tpList.length} 个有效` : '访客一次性通行';
+    if (notifyEl) notifyEl.textContent = unread ? `${unread}条未读` : '开锁提醒、告警推送';
+  }
+
+  jzInitTabScroll('profileScroll', {
+    onRefresh: refreshProfileBadges,
+  });
+
+  window.addEventListener('jz-temp-passwords-changed', refreshProfileBadges);
+
+  jzWatchPageRefresh({
+    onResume: refreshProfileBadges,
+    onBindChange: (d) => {
+      if (!d.bound && d.cleared) location.reload();
+      else refreshProfileBadges();
+    },
+  });
+});
+</script>
+</body>
+</html>

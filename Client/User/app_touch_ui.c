@@ -101,6 +101,9 @@ static void app_touch_process_release(lv_coord_t x, lv_coord_t y)
     if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
         return;
     }
+    if(screen1_is_lockout_active() != 0u) {
+        return;
+    }
     if(lv_scr_act() != guider_ui.screen_1) {
         return;
     }

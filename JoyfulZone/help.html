@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>帮助与反馈 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  initSettingsPage('帮助与反馈', 'profile.html', `
+    ${renderSettingsGroup([
+      [jzHref('unlock.html', 'help'), 'fa-lock-open', '如何远程开锁', '长按 2 秒确认开门', null],
+      [jzHref('users.html', 'help'), 'fa-users', '如何添加用户', '添加账号后，在详情里设密码、绑卡', null],
+      [jzHref('devices.html', 'help'), 'fa-wifi', '无法连接门锁', '检查 WiFi 与设备在线', null],
+    ])}
+    ${renderSectionLabel('意见反馈')}
+    <textarea id="feedback" class="w-full h-24 p-3 rounded-2xl border border-slate-200 text-sm outline-none focus:border-ycu-teal resize-none" placeholder="请描述您遇到的问题…"></textarea>
+    <button type="button" id="submitFb" class="w-full py-3.5 rounded-2xl bg-ycu-teal-dark text-white font-semibold">提交反馈</button>
+  `, { backAnchor: 'profile' });
+
+  document.getElementById('submitFb').onclick = () => {
+    const text = document.getElementById('feedback').value.trim();
+    if (!text) {
+      showToast('请先填写反馈内容', 'error');
+      return;
+    }
+    showToast('反馈已提交，感谢！');
+    document.getElementById('feedback').value = '';
+  };
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Joyful Zone — 智能门禁 App 原型索引</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+  <style>
+    body { font-family: 'Noto Sans SC', system-ui, sans-serif; }
+    .phone-frame { width: 260px; height: 520px; border-radius: 28px; padding: 8px; background: #0f172a; box-shadow: 0 20px 50px rgba(0,155,142,.2); }
+    .phone-inner { border-radius: 22px; overflow: hidden; height: 100%; background: #fff; }
+    .preview-iframe { width: 100%; height: 100%; border: none; pointer-events: none; }
+    .module-card { transition: transform .2s ease, box-shadow .2s ease; }
+    .module-card:hover { transform: translateY(-4px); box-shadow: 0 16px 32px rgba(0,155,142,.12); }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-ycu-teal-light via-white to-slate-100 min-h-screen">
+
+  <header class="bg-ycu-teal text-white">
+    <div class="max-w-6xl mx-auto px-6 py-10">
+      <div class="flex flex-wrap items-center gap-5 mb-5">
+        <img src="assets/ycu_emblem.png" alt="宜春学院" class="w-20 h-20 rounded-full bg-white p-1 shadow-lg ring-4 ring-white/20">
+        <div>
+          <h1 class="text-3xl font-extrabold tracking-tight">Joyful Zone</h1>
+          <p class="text-white/85 text-sm mt-1">智能门禁 Android App · 交互原型 · modelkey 双机门锁</p>
+        </div>
+      </div>
+      <p class="text-white/90 text-sm max-w-3xl leading-relaxed">
+        原型与 Host 端 LVGL 界面采用统一品牌色（青绿 #009B8E、学院蓝、琥珀金）。
+        参考市面门锁 App：首页锁态大圆钮、长按远程开锁、记录时间轴、设备双节点、用户与凭证管理。
+      </p>
+      <div class="flex flex-wrap gap-2 mt-5">
+        <span class="px-3 py-1 rounded-full bg-white/15 text-xs"><i class="fa-brands fa-android mr-1"></i> Material 风格</span>
+        <span class="px-3 py-1 rounded-full bg-white/15 text-xs"><i class="fa-solid fa-palette mr-1"></i> 宜春学院品牌色</span>
+        <span class="px-3 py-1 rounded-full bg-white/15 text-xs"><i class="fa-solid fa-cloud mr-1"></i> 云端 MQTT</span>
+        <span class="px-3 py-1 rounded-full bg-white/15 text-xs"><i class="fa-solid fa-fingerprint mr-1"></i> NFC / 指纹</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-6 py-10">
+    <h2 class="text-xl font-bold text-ycu-navy mb-1 flex items-center gap-2">
+      <i class="fa-solid fa-grid-2 text-ycu-teal"></i> 页面原型导航
+    </h2>
+    <p class="text-slate-500 text-sm mb-8">核心页面 + 个人中心子功能 · 每行两个模块 · 点击「打开页面」进入完整交互</p>
+    <div id="module-grid" class="grid grid-cols-1 md:grid-cols-2 gap-8"></div>
+  </main>
+
+  <section class="max-w-6xl mx-auto px-6 pb-14">
+    <div class="bg-white rounded-2xl p-6 shadow-md-elev-1 border border-ycu-teal/10">
+      <h3 class="text-lg font-bold text-ycu-navy mb-4"><i class="fa-solid fa-sitemap text-ycu-teal mr-2"></i>产品信息架构</h3>
+      <div class="overflow-x-auto text-sm">
+        <table class="w-full text-left">
+          <thead>
+            <tr class="border-b text-slate-500">
+              <th class="py-2 pr-4">模块</th><th class="py-2 pr-4">页面</th><th class="py-2 pr-4">文件</th><th class="py-2">说明</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-700">
+            <tr class="border-b border-slate-50"><td class="py-2">认证</td><td>启动 / 引导 / 登录</td><td class="font-mono text-ycu-teal text-xs">splash · onboarding · login</td><td>品牌展示、功能介绍、手机号登录</td></tr>
+            <tr class="border-b border-slate-50"><td class="py-2">核心</td><td>首页 / 远程开锁</td><td class="font-mono text-ycu-teal text-xs">home · unlock</td><td>锁态、快捷入口、长按防误触开锁</td></tr>
+            <tr class="border-b border-slate-50"><td class="py-2">数据</td><td>记录 / 通知</td><td class="font-mono text-ycu-teal text-xs">records · notifications</td><td>开锁时间轴、告警与系统消息</td></tr>
+            <tr class="border-b border-slate-50"><td class="py-2">设备</td><td>设备管理 / 详情</td><td class="font-mono text-ycu-teal text-xs">devices · device_detail</td><td>三级返回：详情→设备管理→首页</td></tr>
+            <tr class="border-b border-slate-50"><td class="py-2">管理</td><td>用户管理</td><td class="font-mono text-ycu-teal text-xs">users · user_detail</td><td>64 用户，门锁屏录入 NFC/指纹</td></tr>
+            <tr class="border-b border-slate-50"><td class="py-2">账户</td><td>个人中心 / 头像 / 主题</td><td class="font-mono text-ycu-teal text-xs">profile · avatar_picker · theme</td><td>标准/成人/老年模式、头像个性化</td></tr>
+            <tr><td class="py-2">安全</td><td>开锁设置 / 临时密码</td><td class="font-mono text-ycu-teal text-xs">unlock_settings · temp_password</td><td>二次验证、一次性访客密码（5 分钟）</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer class="text-center text-slate-400 text-xs pb-8">Joyful Zone · STM32F407 智能门锁 · 仅供设计与开发参考</footer>
+
+  <script>
+    const modules = [
+      { id: 1, file: 'splash.html', title: '启动页', icon: 'fa-graduation-cap', tag: '品牌', desc: '校徽与 Joyful Zone 品牌，2 秒后进入引导' },
+      { id: 2, file: 'onboarding.html', title: '新手引导', icon: 'fa-hand-pointer', tag: '引导', desc: '三屏滑动：远程开锁、记录同步、凭证管理' },
+      { id: 3, file: 'login.html', title: '登录注册', icon: 'fa-mobile-screen-button', tag: '认证', desc: '手机号 + 验证码，首次绑定门锁二维码' },
+      { id: 4, file: 'home.html', title: '首页', icon: 'fa-house', tag: '核心', desc: '锁态圆钮、设备在线、快捷四宫格、最近记录' },
+      { id: 5, file: 'unlock.html', title: '远程开锁', icon: 'fa-lock-open', tag: '核心', desc: '长按 2 秒 + 可选二次验证密码，防误触远程开锁' },
+      { id: 6, file: 'records.html', title: '开锁记录', icon: 'fa-clock-rotate-left', tag: '数据', desc: '时间轴列表，按密码/NFC/指纹/远程筛选' },
+      { id: 7, file: 'devices.html', title: '设备管理', icon: 'fa-server', tag: '设备', desc: '门锁卡片配图 · 进入详情与子设置页' },
+      { id: 8, file: 'device_detail.html', title: '设备详情', icon: 'fa-circle-info', tag: '设备', desc: '首页→详情→返回设备管理→返回首页' },
+      { id: 9, file: 'users.html', title: '用户管理', icon: 'fa-users', tag: '管理', desc: '用户列表、详情、添加' },
+      { id: 10, file: 'notifications.html', title: '通知中心', icon: 'fa-bell', tag: '数据', desc: '开锁提醒、告警；通知详情可点' },
+      { id: 11, file: 'profile.html', title: '个人中心', icon: 'fa-user-gear', tag: '账户', desc: '头像、主题模式、远程开锁设置、临时密码' },
+      { id: 12, file: 'avatar_picker.html', title: '头像选择', icon: 'fa-image-portrait', tag: '账户', desc: '6 款渐变头像，同步首页与个人中心' },
+      { id: 13, file: 'theme.html', title: '主题与显示', icon: 'fa-palette', tag: '账户', desc: '标准 / 成人 / 老年三种界面模式' },
+      { id: 14, file: 'unlock_settings.html', title: '远程开锁设置', icon: 'fa-shield-halved', tag: '安全', desc: '二次验证开关与 6 位 App 密码' },
+      { id: 15, file: 'temp_password.html', title: '临时密码', icon: 'fa-key', tag: '安全', desc: '生成访客账号密码，5 分钟内可用一次' },
+    ];
+
+    const grid = document.getElementById('module-grid');
+    modules.forEach((m) => {
+      grid.innerHTML += `
+        <article class="module-card bg-white rounded-2xl overflow-hidden border border-ycu-teal/10 shadow-md-elev-1">
+          <div class="bg-ycu-teal px-5 py-4 flex items-center justify-between text-white">
+            <div class="flex items-center gap-3">
+              <span class="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center text-sm font-bold">${m.id}</span>
+              <div>
+                <h3 class="font-bold text-lg">${m.title}</h3>
+                <p class="text-white/75 text-xs font-mono">${m.file} · ${m.tag}</p>
+              </div>
+            </div>
+            <i class="fa-solid ${m.icon} text-2xl opacity-70"></i>
+          </div>
+          <div class="p-5 flex flex-col sm:flex-row gap-5 items-center">
+            <div class="phone-frame flex-shrink-0">
+              <div class="phone-inner">
+                <iframe class="preview-iframe" src="${m.file}" title="${m.title}" loading="lazy"></iframe>
+              </div>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-slate-600 text-sm leading-relaxed mb-4">${m.desc}</p>
+              <a href="${m.file}" class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-ycu-teal text-white text-sm font-semibold shadow-md-elev-2 hover:bg-ycu-teal-dark transition">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开页面
+              </a>
+            </div>
+          </div>
+        </article>`;
+    });
+  </script>
+</body>
+</html>

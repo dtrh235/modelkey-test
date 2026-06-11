@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>选择头像 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  let selected = jzLoadSettings().avatar;
+  initSettingsPage('选择头像', 'profile.html', `
+    ${renderPageDesc('选一个您喜欢的头像')}
+    <div id="grid">${renderAvatarPickerGrid(selected)}</div>
+    <button type="button" id="saveAvatar" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-ycu-teal to-ycu-teal-dark text-white font-semibold shadow-card">保存头像</button>
+  `, { backAnchor: 'profile' });
+
+  document.querySelectorAll('.avatar-pick').forEach((btn) => {
+    btn.onclick = () => {
+      selected = +btn.dataset.avatar;
+      document.querySelectorAll('.avatar-pick').forEach((b) => {
+        const idx = +b.dataset.avatar;
+        const circle = b.querySelector('.avatar-circle');
+        if (!circle) return;
+        const on = idx === selected;
+        circle.className = `avatar-circle w-[4.5rem] h-[4.5rem] rounded-full aspect-square bg-gradient-to-br ${JZ_AVATARS[idx].bg} flex items-center justify-center text-white text-2xl ring-4 ${on ? 'ring-ycu-teal shadow-card scale-105' : 'ring-slate-100'} transition-all`;
+      });
+    };
+  });
+
+  document.getElementById('saveAvatar').onclick = () => {
+    jzSaveSettings({ avatar: selected });
+    showToast('头像已更新');
+    setTimeout(() => { location.href = 'profile.html'; }, 600);
+  };
+});
+</script>
+</body>
+</html>

@@ -77,6 +77,8 @@ uint8_t app_wifi_scan_get_ssid_channel(const char *ssid);
 void app_wifi_scan_defer_rescan_ms(uint32_t ms);
 /* 中止 CWLAP 并等待 UART2/模组空闲（连接前必须调用） */
 uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms);
+/* CloudTask 内调用：中止扫描并清 MCU 侧 busy（不抢 UART2 mutex） */
+void app_wifi_scan_abort_for_mqtt(void);
 /* CloudTask 内调用：仅停扫/清标志，不 poll（避免 mutex 重入） */
 void app_wifi_scan_drop_for_connect(void);
 /* 扫描/UI 结束后释放 UART2（清 async/ui_busy/尾包），便于下次扫描或连接 */

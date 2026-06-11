@@ -58,7 +58,15 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
 #endif
     app_unlock_uart4_on_unlock_ok(account, method);
     cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, account);
-    cloud_ota_service_report_unlock_record(account, method, HAL_GetTick());
+    if(strcmp(method, "remote") == 0) {
+        cloud_ota_service_queue_unlock_report_ex("0", "phone", HAL_GetTick(),
+                                                 CLOUD_UNLOCK_DEVICE_PHONE);
+    } else if(strcmp(method, "temporary-password") == 0 || strcmp(method, "temporary") == 0) {
+        cloud_ota_service_queue_unlock_report_ex("temporary account", "temporary-password",
+                                                   HAL_GetTick(), CLOUD_UNLOCK_DEVICE_MASTER);
+    } else {
+        cloud_ota_service_queue_unlock_report(account, method, HAL_GetTick());
+    }
 }
 
 void app_unlock_event_gui_pump(void)

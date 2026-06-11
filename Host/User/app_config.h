@@ -41,6 +41,10 @@
  */
 #define APP_ALIYUN_MQTT_PASSWORD   "6DE74821026461352E60C38C45380F5F44D1A70F"
 
+/* 门锁 ↔ 后端桥接自定义 Topic（经云产品流转，与服务器设备 uZdKY8... 互通） */
+#define APP_BRIDGE_TOPIC_TERMINAL_PUSH  "/user/terminal/push"
+#define APP_BRIDGE_TOPIC_TERMINAL_GET   "/user/terminal/get"
+
 /* Feature / boot flags */
 #define APP_NFC_ENABLE          1
 #define APP_TEMP_DISABLE_BIOMETRIC 0
@@ -68,7 +72,7 @@
 #ifndef APP_WIFI_UART_DEBUG
 #define APP_WIFI_UART_DEBUG      0
 #endif
-/* 1=CWJAP 关键步骤固定串口日志（不占 printf，可与 APP_WIFI_UART_DEBUG=0 同开） */
+/* 1=CWJAP 关键步骤固定串口日志（不占 printf，Flash 紧张保持 0） */
 #ifndef APP_WIFI_CWJAP_TRACE
 #define APP_WIFI_CWJAP_TRACE     0
 #endif
@@ -192,19 +196,31 @@
 #ifndef APP_SLAVE_LOG_VERBOSE
 #define APP_SLAVE_LOG_VERBOSE 0
 #endif
-/* 1: 云端/WiFi 诊断打到调试串口 USART6（与 APP_WIFI_UART_DEBUG 配合） */
+/*
+ * 云端日志（均走 usart_debug_tx_str，勿开 APP_CLOUD_UART_DEBUG=1，会链入 printf 导致 Flash 溢出）
+ * - APP_CLOUD_TRACE：MQTT 建链/在线 [CLOUD] ...
+ * - APP_TIME_TRACE：NTP 校时 [TIME] ...
+ * - APP_CLOUD_COMMAND_TRACE：terminal/get 桥接 [CLOUD][CMD]/[CLOUD][BIND]
+ */
 #ifndef APP_CLOUD_UART_DEBUG
 #define APP_CLOUD_UART_DEBUG     0
 #endif
-/* 1: 云端 MQTT/连接 固定短日志 */
 #ifndef APP_CLOUD_TRACE
-#define APP_CLOUD_TRACE          0
+#define APP_CLOUD_TRACE          1
 #endif
-/* 1: 时间同步固定短日志（USART 调试口，不占 printf Flash） */
+#ifndef APP_CLOUD_CONNECT_DIAG
+#define APP_CLOUD_CONNECT_DIAG   0
+#endif
+#ifndef APP_CLOUD_COMMAND_ENABLE
+#define APP_CLOUD_COMMAND_ENABLE 1
+#endif
+#ifndef APP_CLOUD_COMMAND_TRACE
+#define APP_CLOUD_COMMAND_TRACE  1
+#endif
 #ifndef APP_TIME_TRACE
-#define APP_TIME_TRACE           0
+#define APP_TIME_TRACE           1
 #endif
-/* 1: WiFi 已连则 MQTT 长连，不再周期性 CIPCLOSE；离线开锁写 Flash，上线补传 */
+/* 1: WiFi 已连则 MQTT 长连，不主动 CIPCLOSE；仍须 PINGREQ 保活（见 cloud_aliyun_at） */
 #ifndef APP_CLOUD_PERSISTENT_MQTT
 #define APP_CLOUD_PERSISTENT_MQTT  1
 #endif

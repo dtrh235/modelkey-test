@@ -1,0 +1,10 @@
+node_modules/
+www/
+android/
+.idea/
+*.iml
+local.properties
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/

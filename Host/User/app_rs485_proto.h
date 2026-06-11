@@ -19,6 +19,8 @@
  *   0x02 USER_ADD    payload = user_cred_t 原始二进制
  *   0x03 USER_DELETE payload = 账号 13 字节（与 cred.acc 相同布局，0 填充）
  *   0x05 FP_TEMPLATE  payload = rs485_fp_tpl_chunk_t（128B 分片 ×4 = 512B 模板）
+ *   0x06 TEMP_PWD_SET payload = account[5] + password[7] + valid_sec(uint32 LE)
+ *   0x07 TEMP_PWD_REVOKE payload = account[5]
  * 从机→主机:
  *   0x04 MIRROR_SYNC_REQ payload 空 — 请主机尽快下发全量用户（账号/密码/NFC/指纹）
  *   0x10 SLAVE_UNLOCK_NOTIFY payload 15 字节 rs485_unlock_notify_t:
@@ -31,6 +33,9 @@ bool app_rs485_proto_slave_user_add(const user_cred_t *u, uint32_t tout_ms);
 bool app_rs485_proto_slave_user_delete(const char *acc, uint32_t tout_ms);
 bool app_rs485_proto_slave_fp_template_chunk(const rs485_fp_tpl_chunk_t *chunk, uint32_t tout_ms);
 bool app_rs485_proto_slave_unlock_notify(const char *acc, uint8_t method_id, uint32_t tout_ms);
+bool app_rs485_proto_slave_temp_password_set(const char *account, const char *password,
+                                             uint32_t valid_sec, uint32_t tout_ms);
+bool app_rs485_proto_slave_temp_password_revoke(const char *account, uint32_t tout_ms);
 
 void app_rs485_master_poll_incoming(uint32_t read_tout_ms);
 uint8_t app_rs485_master_cmd_in_progress(void);

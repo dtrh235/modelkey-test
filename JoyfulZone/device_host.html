@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>门锁主屏 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+initSettingsPage('门锁主屏', 'device_detail.html', `
+  <div class="bg-white rounded-2xl overflow-hidden shadow-card border border-ycu-teal/10 flex gap-0">
+    ${renderLockImage('w-28 h-28 flex-shrink-0 rounded-2xl')}
+    <div class="p-4 flex-1">
+      <p class="font-bold text-ycu-navy">主屏控制面板</p>
+      <p class="text-sm text-emerald-600 mt-1"><i class="fa-solid fa-circle text-[6px] mr-1"></i>在线</p>
+      <p class="text-sm text-slate-400 mt-2">固件 v2.4.1</p>
+    </div>
+  </div>
+  ${renderSettingsGroup([
+    ['#', 'fa-display', '触屏菜单', '开锁、用户管理、设置', null],
+    ['#', 'fa-nfc-symbol', '刷卡开锁', '支持门禁卡', null],
+    ['#', 'fa-fingerprint', '指纹开锁', '支持指纹验证与录入', null],
+    ['#', 'fa-users', '用户管理', '最多 64 位用户', null],
+  ])}
+`);
+</script>
+</body>
+</html>

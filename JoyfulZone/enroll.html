@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>凭证录入 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(location.search);
+  const userId = params.has('id') ? params.get('id') : null;
+  const user = userId != null ? jzGetUser(userId) : null;
+  const initialTab = params.get('tab') === 'fp' ? 'fp' : 'nfc';
+  const backUrl = user
+    ? `user_detail.html?id=${encodeURIComponent(user.id)}`
+    : 'users.html';
+
+  const userBanner = user
+    ? `<div class="mb-4 flex items-center gap-3 p-3 rounded-2xl bg-ycu-teal-light/80 border border-ycu-teal/15">
+        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-ycu-teal to-ycu-blue text-white flex items-center justify-center font-bold text-xs font-mono">${jzUserAvatarText(user)}</div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-ycu-navy font-mono tracking-wide">为账号 ${user.acc} 录入凭证</p>
+          <p class="text-xs text-slate-500 mt-0.5">${jzUserRoleLabel(user)}</p>
+        </div>
+      </div>`
+    : `<p class="text-xs text-ycu-sun mb-4 p-3 rounded-xl bg-orange-50 border border-orange-100">请从「用户详情」进入本页，以便绑定到正确账号。</p>`;
+
+  const userPicker = user
+    ? ''
+    : `<select id="userSelect" class="w-full mb-3 p-3 rounded-xl border border-slate-200 text-sm bg-ycu-surface">
+        ${jzUsersFromCache().filter((u) => !jzUserIsAdmin(u)).map((u) => `<option value="${u.id}">${u.acc}</option>`).join('')}
+      </select>`;
+
+  initAndroidPhone(`
+    ${renderTopAppBar('凭证录入', { back: backUrl })}
+    <div class="flex-1 px-4 py-4 bg-ycu-surface overflow-y-auto">
+      ${userBanner}
+      ${renderPageDesc('在门锁上完成录入；App 显示步骤与状态提示。')}
+
+      <div class="grid grid-cols-2 gap-3 mb-6">
+        <button id="tabNfc" type="button" class="enroll-tab p-4 rounded-2xl text-left transition-all">
+          <i class="fa-solid fa-nfc-symbol text-2xl mb-2 block"></i>
+          <p class="font-bold">NFC 卡片</p>
+          <p class="text-sm opacity-80 mt-1">贴近门锁读卡区</p>
+        </button>
+        <button id="tabFp" type="button" class="enroll-tab p-4 rounded-2xl text-left transition-all">
+          <i class="fa-solid fa-fingerprint text-2xl mb-2 block"></i>
+          <p class="font-bold">指纹录入</p>
+          <p class="text-sm mt-1 opacity-80">按压指纹区</p>
+        </button>
+      </div>
+
+      <div id="panelNfc" class="bg-white rounded-2xl p-5 shadow-card text-center">
+        ${renderNfcEnrollAnimation()}
+        <h3 class="font-bold text-ycu-navy mb-2">NFC 录入步骤</h3>
+        ${renderEnrollSteps([
+          user ? `已选择账号：${user.acc}` : '在 App 选择目标账号',
+          '门锁：菜单 → 用户表 → 选择该用户 → NFC 录入',
+          '将卡片贴近读卡器，听到提示音即成功',
+        ])}
+        ${userPicker}
+        <button type="button" id="btnNfcStart" class="w-full py-3 rounded-xl bg-ycu-teal text-white font-semibold">开始 NFC 录入</button>
+      </div>
+
+      <div id="panelFp" class="hidden bg-white rounded-2xl p-5 shadow-card text-center">
+        ${renderFpEnrollAnimation()}
+        <h3 class="font-bold text-ycu-navy mb-2">指纹录入步骤</h3>
+        ${renderEnrollSteps([
+          user ? `已选择账号：${user.acc}` : '在 App 选择目标账号',
+          '门锁进入该用户的指纹录入模式',
+          '同一手指按压 3 次，每次短蜂鸣后抬起',
+        ], 'ycu-blue')}
+        ${userPicker}
+        <p id="fpProgress" class="text-xs text-ycu-blue mb-3 font-medium">进度：第 1 / 3 次</p>
+        <button type="button" id="btnFpStart" class="w-full py-3 rounded-xl bg-ycu-blue text-white font-semibold">开始指纹录入</button>
+      </div>
+    </div>
+  `, { fullBleed: true });
+
+  const tabNfc = document.getElementById('tabNfc');
+  const tabFp = document.getElementById('tabFp');
+  const panelNfc = document.getElementById('panelNfc');
+  const panelFp = document.getElementById('panelFp');
+
+  function setTab(which) {
+    const nfcOn = which === 'nfc';
+    tabNfc.className = nfcOn
+      ? 'enroll-tab p-4 rounded-2xl bg-ycu-teal text-white shadow-card text-left'
+      : 'enroll-tab p-4 rounded-2xl bg-white text-ycu-navy shadow-card text-left border border-slate-100';
+    tabFp.className = !nfcOn
+      ? 'enroll-tab p-4 rounded-2xl bg-ycu-blue text-white shadow-card text-left'
+      : 'enroll-tab p-4 rounded-2xl bg-white text-ycu-navy shadow-card text-left border border-slate-100';
+    tabFp.querySelector('.fa-fingerprint').className = `fa-solid fa-fingerprint text-2xl mb-2 block ${nfcOn ? 'text-ycu-blue' : ''}`;
+    panelNfc.classList.toggle('hidden', !nfcOn);
+    panelFp.classList.toggle('hidden', nfcOn);
+  }
+
+  tabNfc.onclick = () => setTab('nfc');
+  tabFp.onclick = () => setTab('fp');
+  setTab(initialTab);
+
+  function targetAccount() {
+    if (user) return user.acc;
+    const sel = document.getElementById('userSelect');
+    return sel ? sel.options[sel.selectedIndex].text : '用户';
+  }
+
+  document.getElementById('btnNfcStart').onclick = () => {
+    showToast(`账号${targetAccount()}请在读卡区刷卡`, 'info');
+  };
+  document.getElementById('btnFpStart').onclick = () => {
+    showToast(`账号${targetAccount()}请在指纹区按压`, 'info');
+  };
+});
+</script>
+</body>
+</html>

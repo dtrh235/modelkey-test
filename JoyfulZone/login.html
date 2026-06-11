@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>登录 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  initAndroidPhone(`
+    <div class="flex-1 flex flex-col bg-white overflow-y-auto">
+      <div class="bg-ycu-teal px-6 pt-8 pb-16 rounded-b-[32px] text-white text-center">
+        <img src="assets/ycu_emblem.png" alt="" class="w-16 h-16 rounded-full bg-white p-0.5 mx-auto mb-3">
+        <h1 class="text-xl font-bold">欢迎登录 Joyful Zone</h1>
+        <p class="text-white/75 text-xs mt-1">绑定门锁后即可远程管理</p>
+      </div>
+      <div class="px-6 -mt-8">
+        <div class="bg-white rounded-2xl shadow-md-elev-2 p-5 border border-slate-100">
+          <label class="text-xs font-medium text-slate-500">手机号</label>
+          <div class="flex items-center gap-2 mt-1 mb-4 border-b border-slate-200 pb-2">
+            <span class="text-ycu-navy font-medium">+86</span>
+            <input type="tel" placeholder="请输入手机号" class="flex-1 outline-none text-ycu-navy" value="13800138000">
+          </div>
+          <label class="text-xs font-medium text-slate-500">验证码</label>
+          <div class="flex gap-2 mt-1 mb-2">
+            <input type="text" placeholder="6 位验证码" class="flex-1 outline-none border-b border-slate-200 pb-2 text-ycu-navy" value="888888">
+            <button class="text-ycu-teal text-sm font-semibold whitespace-nowrap px-2">获取验证码</button>
+          </div>
+        </div>
+        <button id="loginBtn" class="w-full mt-6 py-3.5 rounded-xl bg-ycu-teal text-white font-semibold shadow-md-elev-2">登录 / 注册</button>
+        <p class="text-center text-xs text-slate-400 mt-4">
+          登录即表示同意 <a href="${jzHref('agreement.html', 'login')}" class="text-ycu-teal">用户协议</a>
+        </p>
+        <div class="mt-8 p-4 rounded-xl bg-ycu-teal-light border border-ycu-teal/20">
+          <p class="text-sm text-ycu-teal-dark font-medium mb-3"><i class="fa-solid fa-qrcode mr-1"></i> 首次使用？</p>
+          <div class="w-24 h-24 mx-auto bg-white rounded-lg flex items-center justify-center border-2 border-dashed border-ycu-teal/30">
+            <i class="fa-solid fa-qrcode text-4xl text-ycu-teal/40"></i>
+          </div>
+          ${renderHint('扫描门锁上的绑定二维码即可连接', true)}
+        </div>
+      </div>
+    </div>
+  `);
+  document.getElementById('loginBtn').onclick = () => {
+    showToast('登录成功');
+    setTimeout(() => { window.location.href = 'home.html'; }, 800);
+  };
+});
+</script>
+</body>
+</html>

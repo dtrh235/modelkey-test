@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>消息通知 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const s = jzLoadSettings();
+  const state = {
+    notifyPush: s.notifyPush,
+    notifyUnlock: s.notifyUnlock,
+    notifyRemote: s.notifyRemote,
+    notifyAlert: s.notifyAlert,
+    notifyDevice: s.notifyDevice,
+    notifySystem: s.notifySystem,
+    notifySound: s.notifySound,
+    notifyVibrate: s.notifyVibrate,
+  };
+
+  const backUrl = jzResolveBack('profile.html');
+
+  initSettingsPage('消息通知', backUrl, `
+    <div class="bg-white rounded-2xl shadow-card border border-slate-50 overflow-hidden divide-y divide-slate-50">
+      ${renderSwitchRow('swPush', '接收推送', '关闭后不再弹出提醒', state.notifyPush)}
+    </div>
+    ${renderSectionLabel('提醒类型')}
+    <div class="bg-white rounded-2xl shadow-card border border-slate-50 overflow-hidden divide-y divide-slate-50" id="typeGroup">
+      ${renderSwitchRow('swUnlock', '开锁成功', '家人开锁时通知您', state.notifyUnlock)}
+      ${renderSwitchRow('swRemote', '远程开锁', '有人用手机远程开门', state.notifyRemote)}
+      ${renderSwitchRow('swAlert', '安全告警', '密码错误、异常尝试', state.notifyAlert)}
+      ${renderSwitchRow('swDevice', '用户与设备', '门锁用户增删改、凭证变更', state.notifyDevice)}
+      ${renderSwitchRow('swSystem', '系统更新', '固件与 App 更新提示', state.notifySystem)}
+    </div>
+    ${renderSectionLabel('提醒方式')}
+    <div class="bg-white rounded-2xl shadow-card border border-slate-50 overflow-hidden divide-y divide-slate-50">
+      ${renderSwitchRow('swSound', '声音', null, state.notifySound)}
+      ${renderSwitchRow('swVibrate', '振动', null, state.notifyVibrate)}
+    </div>
+    <a href="${jzHref('notifications.html', 'notify_settings')}" class="flex items-center justify-between px-4 py-3.5 bg-white rounded-2xl shadow-card border border-slate-50 active:bg-ycu-teal-light/40">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-ycu-teal-light flex items-center justify-center"><i class="fa-solid fa-bell text-ycu-teal-dark text-sm"></i></div>
+        <span class="text-sm font-medium text-ycu-navy">查看通知中心</span>
+      </div>
+      <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+    </a>
+    ${renderHint('关闭推送后，历史消息仍可在通知中心查看。修改后将自动保存。')}
+  `);
+
+  function setTypeGroupDisabled(disabled) {
+    const g = document.getElementById('typeGroup');
+    if (!g) return;
+    g.classList.toggle('opacity-50', disabled);
+    g.classList.toggle('pointer-events-none', disabled);
+  }
+
+  function persistNotify() {
+    jzSaveSettings({ ...state });
+  }
+
+  jzBindSwitch('swPush', () => state.notifyPush, (v) => {
+    state.notifyPush = v;
+    setTypeGroupDisabled(!v);
+    persistNotify();
+  });
+  jzBindSwitch('swUnlock', () => state.notifyUnlock, (v) => { state.notifyUnlock = v; persistNotify(); });
+  jzBindSwitch('swRemote', () => state.notifyRemote, (v) => { state.notifyRemote = v; persistNotify(); });
+  jzBindSwitch('swAlert', () => state.notifyAlert, (v) => { state.notifyAlert = v; persistNotify(); });
+  jzBindSwitch('swDevice', () => state.notifyDevice, (v) => { state.notifyDevice = v; persistNotify(); });
+  jzBindSwitch('swSystem', () => state.notifySystem, (v) => { state.notifySystem = v; persistNotify(); });
+  jzBindSwitch('swSound', () => state.notifySound, (v) => { state.notifySound = v; persistNotify(); });
+  jzBindSwitch('swVibrate', () => state.notifyVibrate, (v) => { state.notifyVibrate = v; persistNotify(); });
+  setTypeGroupDisabled(!state.notifyPush);
+});
+</script>
+</body>
+</html>

@@ -1198,6 +1198,19 @@ void app_wifi_scan_drop_for_connect(void)
 #endif
 }
 
+void app_wifi_scan_abort_for_mqtt(void)
+{
+#if (APP_WIFI_UI_SCAN_ENABLE == 1)
+    g_wifi_scan_abort = 1u;
+    g_wifi_scan_pending = 0u;
+    s_scan_st = SCAN_ST_IDLE;
+    s_scan_pos = 0u;
+    cloud_aliyun_cwlap_scan_abort();
+    cloud_aliyun_at_cwlap_scan_async_abort();
+    cloud_uart2_set_ui_busy(0u);
+#endif
+}
+
 uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
 {
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
@@ -1307,6 +1320,11 @@ uint8_t app_wifi_connect_poll(void)
                 usart_debug_tx_str("[WiFi] connect esp idle ok\r\n");
 #endif
             } else if(HAL_GetTick() >= s_conn_abort_deadline) {
+                if(cloud_uart2_rx_has("+CWLAP") != 0 ||
+                   cloud_uart2_rx_has("busy p") != 0 ||
+                   cloud_uart2_rx_has("busy") != 0) {
+                    return 0u;
+                }
 #if (APP_WIFI_CWJAP_TRACE != 0)
                 usart_debug_tx_str("[WiFi] connect esp idle timeout\r\n");
 #endif
@@ -1471,6 +1489,7 @@ uint8_t app_wifi_scan_in_rescan_wait(void) { return 0u; }
 uint8_t app_wifi_scan_has_ssid(const char *ssid) { (void)ssid; return 0u; }
 void app_wifi_scan_defer_rescan_ms(uint32_t ms) { (void)ms; }
 void app_wifi_scan_drop_for_connect(void) { (void)0; }
+void app_wifi_scan_abort_for_mqtt(void) { (void)0; }
 uint8_t app_wifi_scan_abort_and_wait_idle(uint32_t timeout_ms)
 {
     (void)timeout_ms;

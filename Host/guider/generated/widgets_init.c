@@ -178,14 +178,16 @@ void app_home_wall_clock_refresh_ui(void)
     int d = 0;
     char datebuf[20];
 
-    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1)) {
+    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1) &&
+       lv_obj_get_screen(guider_ui.screen_digital_clock_1) == guider_ui.screen) {
         lv_dclock_set_text_fmt(guider_ui.screen_digital_clock_1, "%d:%02d",
                                screen_digital_clock_1_hour_value,
                                screen_digital_clock_1_min_value);
     }
     if(app_wall_clock_valid() != 0u &&
        app_wall_clock_get_datetime(&y, &mo, &d, NULL, NULL, NULL) != 0u &&
-       lv_obj_is_valid(guider_ui.screen_datetext_1)) {
+       lv_obj_is_valid(guider_ui.screen_datetext_1) &&
+       lv_obj_get_screen(guider_ui.screen_datetext_1) == guider_ui.screen) {
         (void)snprintf(datebuf, sizeof(datebuf), "%04d/%02d/%02d", y, mo, d);
         lv_label_set_text(guider_ui.screen_datetext_1, datebuf);
     }
@@ -202,11 +204,13 @@ void app_home_wall_clock_set(int year, int month, int day, int hour, int min, in
     screen_digital_clock_1_sec_value = sec;
 
     (void)snprintf(datebuf, sizeof(datebuf), "%04d/%02d/%02d", year, month, day);
-    if(lv_obj_is_valid(guider_ui.screen_datetext_1)) {
+    if(lv_obj_is_valid(guider_ui.screen_datetext_1) &&
+       lv_obj_get_screen(guider_ui.screen_datetext_1) == guider_ui.screen) {
         lv_label_set_text(guider_ui.screen_datetext_1, datebuf);
         ui_date_ok = 1u;
     }
-    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1)) {
+    if(lv_obj_is_valid(guider_ui.screen_digital_clock_1) &&
+       lv_obj_get_screen(guider_ui.screen_digital_clock_1) == guider_ui.screen) {
         lv_dclock_set_text_fmt(guider_ui.screen_digital_clock_1, "%d:%02d", hour, min);
         ui_clk_ok = 1u;
     }

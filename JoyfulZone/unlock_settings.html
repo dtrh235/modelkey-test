@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>远程开锁设置 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const initial = jzLoadSettings();
+  const backUrl = jzResolveBack('profile.html');
+  const state = {
+    authOn: !!initial.unlockSecondAuth,
+    pin: String(initial.unlockSecondPin || '').trim(),
+    hasPin: jzHasUnlockPin(initial.unlockSecondPin),
+  };
+
+  const pinInputCls = 'w-full text-center text-xl tracking-[0.45em] py-3 rounded-xl border-2 border-ycu-teal/25 focus:border-ycu-teal outline-none font-mono';
+
+  function goBack() {
+    if (history.length > 1) history.back();
+    else location.href = backUrl;
+  }
+
+  /** setup=首次设置 | change=修改 | disable=关闭验证 | idle=未启用 */
+  function formMode() {
+    if (!state.authOn) return state.hasPin ? 'disable' : 'idle';
+    return state.hasPin ? 'change' : 'setup';
+  }
+
+  function renderPage() {
+    initSettingsPage('远程开锁设置', backUrl, `
+      <div id="unlock-settings-root">
+        <div class="bg-white rounded-2xl shadow-card border border-slate-100 overflow-hidden divide-y divide-slate-50">
+          ${renderSwitchRow('swSecondAuth', '开锁二次验证', '长按后再输入密码', state.authOn)}
+        </div>
+        <div id="pinSection" class="bg-white rounded-2xl p-4 shadow-card border border-slate-50 space-y-3 mt-4">
+          <p class="text-sm font-medium text-slate-600">App 开锁密码</p>
+          <div id="fieldOldWrap" class="space-y-1 hidden">
+            <label class="text-xs text-slate-500 whitespace-nowrap">原密码</label>
+            <input id="pinOld" type="password" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+              placeholder="请输入原密码" class="${pinInputCls}"/>
+          </div>
+          <div id="fieldNewWrap" class="space-y-1 hidden">
+            <label id="pinNewLabel" class="text-xs text-slate-500 whitespace-nowrap">新密码</label>
+            <input id="pinNew" type="password" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+              placeholder="请输入6位数字" class="${pinInputCls}"/>
+          </div>
+          <div id="fieldConfirmWrap" class="space-y-1 hidden">
+            <label class="text-xs text-slate-500 whitespace-nowrap">确认密码</label>
+            <input id="pinConfirm" type="password" maxlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
+              placeholder="请再次输入" class="${pinInputCls}"/>
+          </div>
+          <p id="pinHint" class="text-xs text-slate-400 whitespace-nowrap overflow-hidden text-ellipsis"></p>
+        </div>
+        <button type="button" id="saveUnlockBtn"
+          class="mt-4 block w-full py-3.5 rounded-2xl bg-gradient-to-r from-ycu-teal to-ycu-teal-dark text-white text-center font-semibold shadow-card">
+          保存设置
+        </button>
+        ${renderSettingsGroup([
+          [jzHref('temp_password.html', 'unlock_settings'), 'fa-key', '临时密码', '访客一次性通行', null],
+          [jzHref('unlock.html', 'unlock_settings'), 'fa-lock-open', '试开锁', '体验远程开锁', null],
+        ])}
+      </div>
+    `);
+
+    const oldWrap = document.getElementById('fieldOldWrap');
+    const newWrap = document.getElementById('fieldNewWrap');
+    const confirmWrap = document.getElementById('fieldConfirmWrap');
+    const pinSection = document.getElementById('pinSection');
+    const pinNewLabel = document.getElementById('pinNewLabel');
+    const pinHint = document.getElementById('pinHint');
+
+    function clearInputs() {
+      document.getElementById('pinOld').value = '';
+      document.getElementById('pinNew').value = '';
+      document.getElementById('pinConfirm').value = '';
+    }
+
+    function refreshFields() {
+      const mode = formMode();
+      pinSection.classList.toggle('hidden', mode === 'idle');
+      oldWrap.classList.toggle('hidden', mode !== 'change' && mode !== 'disable');
+      newWrap.classList.toggle('hidden', mode !== 'setup' && mode !== 'change');
+      confirmWrap.classList.toggle('hidden', mode !== 'setup' && mode !== 'change');
+      pinNewLabel.textContent = mode === 'setup' ? '设置密码' : '新密码';
+      const hints = {
+        setup: '首次开启：设置6位数字密码',
+        change: '修改密码需填原密码与新密码',
+        disable: '关闭前请输入原密码',
+        idle: '',
+      };
+      pinHint.textContent = hints[mode] || '';
+    }
+
+    refreshFields();
+
+    jzBindSwitch('swSecondAuth', () => state.authOn, (v) => {
+      state.authOn = v;
+      refreshFields();
+    });
+
+    document.getElementById('saveUnlockBtn').addEventListener('click', () => {
+      const mode = formMode();
+      const oldPin = document.getElementById('pinOld').value.trim();
+      const newPin = document.getElementById('pinNew').value.trim();
+      const confirmPin = document.getElementById('pinConfirm').value.trim();
+
+      if (mode === 'idle') {
+        jzSaveSettings({ unlockSecondAuth: false, unlockSecondPin: '' });
+        showToast('已保存');
+        return;
+      }
+
+      if (mode === 'setup') {
+        if (!/^\d{6}$/.test(newPin) || newPin !== confirmPin) {
+          showToast('两次密码须为6位且一致', 'error');
+          return;
+        }
+        jzSaveSettings({ unlockSecondAuth: true, unlockSecondPin: newPin });
+        state.authOn = true;
+        state.pin = newPin;
+        state.hasPin = true;
+        clearInputs();
+        refreshFields();
+        showToast('二次验证已开启');
+        return;
+      }
+
+      if (mode === 'disable') {
+        if (oldPin !== state.pin) {
+          showToast('原密码错误', 'error');
+          return;
+        }
+        jzSaveSettings({ unlockSecondAuth: false, unlockSecondPin: '' });
+        state.authOn = false;
+        state.pin = '';
+        state.hasPin = false;
+        clearInputs();
+        refreshFields();
+        showToast('已关闭二次验证');
+        return;
+      }
+
+      if (mode === 'change') {
+        if (!newPin && !confirmPin) {
+          showToast('设置已保存');
+          return;
+        }
+        if (oldPin !== state.pin) {
+          showToast('原密码错误', 'error');
+          return;
+        }
+        if (!/^\d{6}$/.test(newPin) || newPin !== confirmPin) {
+          showToast('两次新密码须为6位且一致', 'error');
+          return;
+        }
+        jzSaveSettings({ unlockSecondAuth: true, unlockSecondPin: newPin });
+        state.pin = newPin;
+        clearInputs();
+        showToast('密码已更新');
+      }
+    });
+  }
+
+  if (initial.unlockSecondAuth && state.hasPin) {
+    jzShowPinPrompt({
+      title: '验证身份',
+      hint: '输入当前密码进入设置',
+      okLabel: '进入',
+    }, (val) => {
+      if (val !== state.pin) {
+        showToast('密码错误', 'error');
+        goBack();
+        return;
+      }
+      renderPage();
+    }, goBack);
+  } else {
+    renderPage();
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>用户详情 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  const id = jzQuery('id') || '';
+  let u = jzGetUser(id);
+  if (!u) {
+    const list = await jzFetchUsers({ network: true });
+    u = list.find((x) => String(x.id) === String(id)) || null;
+  }
+  if (!u) {
+    showToast('用户不存在', 'error');
+    setTimeout(() => { location.replace('users.html'); }, 600);
+    return;
+  }
+
+  const enrollBase = `enroll.html?id=${encodeURIComponent(u.id)}`;
+  const pwdHref = `user_password.html?id=${encodeURIComponent(u.id)}`;
+
+  initSettingsPage('用户详情', 'users.html', `
+    <div class="bg-white rounded-2xl p-5 shadow-card text-center border border-slate-50">
+      <div class="w-16 h-16 rounded-full bg-gradient-to-br from-ycu-teal to-ycu-blue text-white text-lg font-bold font-mono flex items-center justify-center mx-auto">${jzUserAvatarText(u)}</div>
+      <h2 class="text-lg font-bold text-ycu-navy mt-3 font-mono tracking-wider">${u.acc}</h2>
+      <p class="text-sm text-slate-400 mt-1">${jzUserRoleLabel(u)}</p>
+    </div>
+
+    ${renderSectionLabel('开门密码')}
+    <div class="bg-white rounded-2xl shadow-card border border-slate-100/80 overflow-hidden">
+      <a href="${pwdHref}" class="flex items-center gap-3 px-4 py-3.5 active:bg-ycu-teal-light/40 transition-colors">
+        <div class="w-9 h-9 rounded-xl bg-ycu-teal-light flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-key text-ycu-teal-dark text-sm"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-ycu-navy">数字密码</p>
+          <p class="text-xs text-slate-400 mt-0.5">${u.pwd ? '已在门锁键盘可用' : '尚未设置，点击添加'}</p>
+        </div>
+        <span class="text-[10px] px-2 py-0.5 rounded-full ${u.pwd ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'} font-medium">${u.pwd ? '已设置' : '未设置'}</span>
+        <span class="text-xs text-ycu-teal-dark font-medium whitespace-nowrap">${u.pwd ? '更改密码' : '设置密码'}</span>
+        <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+      </a>
+    </div>
+
+    ${renderSectionLabel('门禁卡与指纹（在门锁上录入）')}
+    <div class="bg-white rounded-2xl shadow-card border border-slate-100/80 overflow-hidden divide-y divide-slate-50">
+      <a href="${enrollBase}&tab=nfc" class="flex items-center gap-3 px-4 py-3.5 active:bg-ycu-teal-light/40 transition-colors">
+        <div class="w-9 h-9 rounded-xl bg-ycu-teal-light flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-nfc-symbol text-ycu-teal-dark text-sm"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-ycu-navy">门禁卡 NFC</p>
+          <p class="text-xs text-slate-400 mt-0.5">${u.nfc ? '已绑定，可重新录入' : '未绑定，点击进入录入引导'}</p>
+        </div>
+        <span class="text-[10px] px-2 py-0.5 rounded-full ${u.nfc ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'} font-medium">${u.nfc ? '已绑定' : '未绑定'}</span>
+        <span class="text-xs text-ycu-teal-dark font-medium whitespace-nowrap">${u.nfc ? '重新录入' : '去录入'}</span>
+        <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+      </a>
+      <a href="${enrollBase}&tab=fp" class="flex items-center gap-3 px-4 py-3.5 active:bg-ycu-teal-light/40 transition-colors">
+        <div class="w-9 h-9 rounded-xl bg-ycu-teal-light flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-fingerprint text-ycu-teal-dark text-sm"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-ycu-navy">指纹</p>
+          <p class="text-xs text-slate-400 mt-0.5">${u.fp ? '已绑定，可重新录入' : '未绑定，点击进入录入引导'}</p>
+        </div>
+        <span class="text-[10px] px-2 py-0.5 rounded-full ${u.fp ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'} font-medium">${u.fp ? '已绑定' : '未绑定'}</span>
+        <span class="text-xs text-ycu-teal-dark font-medium whitespace-nowrap">${u.fp ? '重新录入' : '去录入'}</span>
+        <i class="fa-solid fa-chevron-right text-slate-300 text-xs"></i>
+      </a>
+    </div>
+    ${renderHint('App 仅提供步骤引导；实际刷卡、按压指纹请在门锁屏幕完成。')}
+
+    ${!jzUserIsAdmin(u)
+      ? `<button type="button" id="btnDeleteUser" class="w-full py-3.5 rounded-2xl bg-white text-ycu-sun font-semibold shadow-card border border-orange-200">删除用户</button>`
+      : renderHint('管理员账号不可删除', true)}
+  `, { backAnchor: 'fixed' });
+
+  const delBtn = document.getElementById('btnDeleteUser');
+  if (delBtn) {
+    delBtn.onclick = async () => {
+      if (!confirm(`确定删除账号「${u.acc}」？删除后该账号将无法开锁。`)) return;
+      const res = await jzDeleteUser(u.acc);
+      if (!res.ok) return;
+      showToast('用户已删除');
+      setTimeout(() => { location.replace('users.html'); }, 600);
+    };
+  }
+
+  function userDetailSig(user) {
+    if (!user) return '';
+    return `${user.acc}:${user.isAdmin ? 1 : 0}:${user.pwd ? 1 : 0}:${user.nfc ? 1 : 0}:${user.fp ? 1 : 0}`;
+  }
+
+  let lastSig = userDetailSig(u);
+
+  async function refreshUserDetailIfChanged() {
+    const list = await jzFetchUsers({ network: true });
+    const fresh = list.find((x) => String(x.id) === String(id));
+    if (!fresh) {
+      showToast('用户已不存在', 'info');
+      setTimeout(() => { location.replace('users.html'); }, 400);
+      return;
+    }
+    const sig = userDetailSig(fresh);
+    if (sig !== lastSig) {
+      lastSig = sig;
+      location.reload();
+    }
+  }
+
+  window.addEventListener('jz-users-changed', () => {
+    const fresh = jzUsersFromCache().find((x) => String(x.id) === String(id));
+    if (!fresh) {
+      location.replace('users.html');
+      return;
+    }
+    const sig = userDetailSig(fresh);
+    if (sig !== lastSig) {
+      lastSig = sig;
+      location.reload();
+    }
+  });
+
+  jzWatchPageRefresh({
+    onResume: () => refreshUserDetailIfChanged(),
+    onBindChange: (d) => {
+      if (d.usersChanged) refreshUserDetailIfChanged();
+    },
+  });
+});
+</script>
+</body>
+</html>

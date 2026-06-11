@@ -17,6 +17,7 @@
 #include "app_ui_nav.h"
 #include "ui_menu_popup_utils.h"
 #include "app_screen3_menu.h"
+#include "app_screen_pair_flow.h"
 #include "app_screen4_table.h"
 #include "app_screen6_dialog_flow.h"
 #include "app_screen6_commit.h"
@@ -63,6 +64,11 @@ void app_key_ui_dispatch(KeyValue_t key)
         return;
     }
 
+    /* 密码自锁倒计时期间禁止离开开锁界面 */
+    if(g_app_scr == APP_SCR_1 && screen1_is_lockout_active() != 0u) {
+        return;
+    }
+
     /* ESC：screen_3 直接回首页，其余页面默认返回上一级。
      * 但 screen_6/8/9/10 有录入弹窗时，优先交给对应页面分支处理，避免切屏与弹窗状态机冲突。 */
     if(key == KEY_ESC) {
@@ -70,6 +76,11 @@ void app_key_ui_dispatch(KeyValue_t key)
            (g_screen8_popup != NULL && lv_obj_is_valid(g_screen8_popup))) {
             /* handled in APP_SCR_8/APP_SCR_9 branches below */
         } else
+        if(g_app_scr == APP_SCR_3 && screen_pair_is_open()) {
+            screen_pair_exit_to_menu();
+            screen3_set_menu_selected(g_screen3_pending_index);
+            return;
+        }
         if(g_app_scr == APP_SCR_3) {
             app_ui_nav_begin((uint8_t)APP_SCR_3);
             ui_load_scr_animation(&guider_ui, &guider_ui.screen, guider_ui.screen_del, &guider_ui.screen_3_del,
@@ -99,15 +110,11 @@ void app_key_ui_dispatch(KeyValue_t key)
         if(g_screen1_unlock_popup != NULL && lv_obj_is_valid(g_screen1_unlock_popup)) {
             return;
         }
+        if(screen1_is_lockout_active() != 0u) {
+            return;
+        }
         if(key == KEY_OK) {
-            const char *acc = lv_textarea_get_text(guider_ui.screen_1_ta_1);
-            const char *pwd = lv_textarea_get_text(guider_ui.screen_1_ta_2);
-            if(unlock_credentials_match_with_delete(acc, pwd)) {
-                screen1_hide_error_label();
-                app_unlock_event_handle_success(APP_UNLOCK_POPUP_SCREEN1, acc, "password");
-            } else {
-                screen1_show_error_label();
-            }
+            (void)screen1_try_password_unlock();
         } else if(key == KEY_UP && g_screen1_field_index > 0u) {
             screen1_set_field_selected(g_screen1_field_index - 1u);
         } else if(key == KEY_DOWN && g_screen1_field_index < 1u) {
@@ -124,6 +131,10 @@ void app_key_ui_dispatch(KeyValue_t key)
             screen2_set_field_selected(g_screen2_field_index + 1u);
         } else {
             screen2_handle_input_key(key);
+        }
+    } else if(g_app_scr == APP_SCR_3 && screen_pair_is_open()) {
+        if(key == KEY_OK) {
+            screen_pair_on_regen();
         }
     } else if(g_app_scr == APP_SCR_3) {
         if(key == KEY_UP) {
@@ -148,6 +159,8 @@ void app_key_ui_dispatch(KeyValue_t key)
             enter_screen_4();
         } else if(key == KEY_OK && g_screen3_menu_index == 4u) {
             enter_screen_wifi();
+        } else if(key == KEY_OK && g_screen3_menu_index == 5u) {
+            enter_screen_pair();
         }
     } else if(g_app_scr == APP_SCR_5) {
         if(key == KEY_OK) {

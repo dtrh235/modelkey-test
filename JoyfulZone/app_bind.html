@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App 绑定 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+const bind = jzDeviceBindInfo();
+const bound = !!bind;
+
+initSettingsPage('App 绑定', 'device_detail.html', `
+  <div class="bg-white rounded-2xl p-6 shadow-card text-center border border-ycu-teal/10">
+    <p class="text-sm text-ycu-navy font-medium mb-4">${bound ? '当前账号已绑定门锁' : '输入门锁 6 位配对码完成绑定'}</p>
+    <div class="w-40 h-28 mx-auto rounded-2xl bg-ycu-surface border-2 border-ycu-teal/20 flex flex-col items-center justify-center">
+      <i class="fa-solid fa-link text-3xl text-ycu-teal mb-2"></i>
+      <p class="text-xs text-slate-500">配对码绑定</p>
+    </div>
+    ${bound
+      ? `<p class="text-xs text-emerald-600 mt-4"><i class="fa-solid fa-check-circle mr-1"></i>已绑定 · ${bind.deviceName || '智能门锁'}</p>`
+      : `<input id="pair-code-input" type="tel" maxlength="6" inputmode="numeric" pattern="[0-9]*"
+          class="w-full max-w-[220px] mx-auto mt-4 px-4 py-3 rounded-xl border border-slate-200 text-xl font-mono text-center tracking-[0.35em]"
+          placeholder="000000">`}
+  </div>
+  ${bound
+    ? `<button type="button" id="rebind-btn" class="w-full py-3.5 rounded-2xl border-2 border-ycu-teal/30 text-ycu-teal-dark font-semibold bg-white">重新输入配对码</button>
+       <button type="button" id="unbind-btn" class="w-full py-3 text-sm text-slate-400">解除绑定</button>`
+    : `<button type="button" id="bind-submit" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-ycu-teal to-ycu-teal-dark text-white font-semibold shadow-card">确认绑定</button>
+       ${renderHint('请先在门锁完成 WiFi 设置，进入「App配对」并等待屏幕显示绿色「可配对」后再输入配对码', true)}`}
+`);
+
+if (!bound) {
+  document.getElementById('bind-submit').addEventListener('click', async () => {
+    const code = document.getElementById('pair-code-input').value;
+    if (await jzBindWithPairCode(code)) location.reload();
+  });
+} else {
+  document.getElementById('rebind-btn').addEventListener('click', async () => {
+    await jzUnbindDevice();
+    location.reload();
+  });
+  document.getElementById('unbind-btn').addEventListener('click', async () => {
+    await jzUnbindDevice();
+    location.replace('devices.html');
+  });
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 #include "app_screen4_table.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "lvgl.h"
@@ -10,6 +11,9 @@
 extern lv_ui guider_ui;
 extern user_cred_t g_users[APP_USER_MAX];
 extern uint8_t g_user_count;
+extern uint8_t g_default_admin_deleted;
+extern uint8_t g_default_admin_is_admin_role;
+extern char g_default_admin_account[13];
 
 #define SCR4_ROW_H          34
 #define SCR4_LIST_PANEL_X   0
@@ -17,9 +21,58 @@ extern uint8_t g_user_count;
 #define SCR4_LIST_PANEL_W   240
 #define SCR4_LIST_PANEL_H   220
 #define SCR4_HDR_H          28
-#define SCR4_ROW_MAX        APP_USER_MAX
+#define SCR4_ROW_MAX        (APP_USER_MAX + 1u)
 
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_20);
+
+typedef struct {
+    char acc[13];
+    const char *role;
+} screen4_row_view_t;
+
+/** 纯数字账号按数值升序（先比位数再比字典序，避免 uint32 溢出） */
+static int screen4_cmp_acc_str(const char *a, const char *b)
+{
+    size_t la;
+    size_t lb;
+
+    if(a == NULL) {
+        a = "";
+    }
+    if(b == NULL) {
+        b = "";
+    }
+    la = strlen(a);
+    lb = strlen(b);
+    if(la != lb) {
+        return (la < lb) ? -1 : 1;
+    }
+    return strcmp(a, b);
+}
+
+static int screen4_cmp_row(const screen4_row_view_t *a, const screen4_row_view_t *b)
+{
+    if(a == NULL || b == NULL) {
+        return 0;
+    }
+    return screen4_cmp_acc_str(a->acc, b->acc);
+}
+
+static void screen4_sort_rows(screen4_row_view_t *rows, uint8_t count)
+{
+    uint8_t i;
+    uint8_t j;
+
+    for(i = 1u; i < count; i++) {
+        screen4_row_view_t key = rows[i];
+        j = i;
+        while(j > 0u && screen4_cmp_row(&rows[j - 1u], &key) > 0) {
+            rows[j] = rows[j - 1u];
+            j--;
+        }
+        rows[j] = key;
+    }
+}
 
 static lv_obj_t *s_hdr_bar = NULL;
 static lv_obj_t *s_list_panel = NULL;
@@ -208,6 +261,7 @@ void screen4_refresh_table(void)
 {
     uint8_t i;
     uint8_t n = 0u;
+    screen4_row_view_t rows[SCR4_ROW_MAX];
 
     screen4_list_panel_setup();
     screen4_clear_rows();
@@ -216,10 +270,28 @@ void screen4_refresh_table(void)
         return;
     }
 
+    if(g_default_admin_deleted == 0u && g_default_admin_account[0] != '\0') {
+        strncpy(rows[n].acc, g_default_admin_account, sizeof(rows[n].acc) - 1u);
+        rows[n].acc[sizeof(rows[n].acc) - 1u] = '\0';
+        rows[n].role = g_default_admin_is_admin_role ? "管理员" : "用户";
+        n++;
+    }
+
     for(i = 0u; i < g_user_count; i++) {
-        if(g_users[i].active != 0u) {
-            n++;
+        if(g_users[i].active == 0u) {
+            continue;
         }
+        if(n >= SCR4_ROW_MAX) {
+            break;
+        }
+        if(g_default_admin_deleted == 0u &&
+           strcmp(g_users[i].acc, g_default_admin_account) == 0) {
+            continue;
+        }
+        strncpy(rows[n].acc, g_users[i].acc, sizeof(rows[n].acc) - 1u);
+        rows[n].acc[sizeof(rows[n].acc) - 1u] = '\0';
+        rows[n].role = g_users[i].is_admin ? "管理员" : "用户";
+        n++;
     }
 
     if(n == 0u) {
@@ -228,11 +300,9 @@ void screen4_refresh_table(void)
         return;
     }
 
-    for(i = 0u; i < g_user_count; i++) {
-        if(g_users[i].active == 0u) {
-            continue;
-        }
-        screen4_append_row(g_users[i].acc, g_users[i].is_admin ? "管理员" : "用户");
+    screen4_sort_rows(rows, n);
+    for(i = 0u; i < n; i++) {
+        screen4_append_row(rows[i].acc, rows[i].role);
     }
 
     lv_obj_scroll_to_y(s_list_panel, 0, LV_ANIM_OFF);

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>家庭成员 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+initSettingsPage('家庭成员', 'profile.html', `
+  ${renderPageDesc('与家人共享这把门锁的使用权限。')}
+  <div class="space-y-2">
+    ${[['1','管理员','我'],['1001','成员','可远程开锁']].map(([acc,r,t]) => `
+      <div class="flex items-center gap-3 p-4 bg-white rounded-2xl shadow-card border border-slate-50">
+        <div class="w-10 h-10 rounded-full bg-ycu-teal-light text-ycu-teal-dark font-bold font-mono text-sm flex items-center justify-center">${acc.length <= 2 ? acc : acc.slice(-2)}</div>
+        <div class="flex-1"><p class="font-medium text-ycu-navy font-mono tracking-wide">${acc}</p><p class="text-[11px] text-slate-400">${r} · ${t}</p></div>
+      </div>`).join('')}
+  </div>
+  <button onclick="showToast('邀请链接已复制','info')" class="w-full py-3.5 rounded-2xl border-2 border-dashed border-ycu-teal/30 text-ycu-teal-dark font-semibold bg-white">邀请家人</button>
+`, { backAnchor: 'profile' });
+</script>
+</body>
+</html>

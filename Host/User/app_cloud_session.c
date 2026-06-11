@@ -1,5 +1,6 @@
 #include "app_cloud_session.h"
 
+#include "app_pair_bind.h"
 #include "cloud_aliyun_at.h"
 #include "cloud_ota_service.h"
 #include "app_unlock_flash_queue.h"
@@ -14,7 +15,7 @@
 #endif
 
 #define CLOUD_SESSION_CONNECT_MS    (90000u)
-#define CLOUD_SESSION_OFFLINE_MS    (5000u)
+#define CLOUD_SESSION_OFFLINE_MS    (2000u)
 #define CLOUD_SESSION_UPLOAD_GAP_MS (300u)
 
 typedef enum {
@@ -31,7 +32,7 @@ static uint32_t s_last_upload_ms = 0u;
 static int cloud_session_publish_cb(const char *json, void *ctx)
 {
     (void)ctx;
-    return (cloud_aliyun_at_publish_property(json) != 0u) ? 1 : 0;
+    return cloud_ota_service_publish_flash_json(json);
 }
 
 void app_cloud_session_init(void)
@@ -48,6 +49,7 @@ void app_cloud_session_wifi_down(void)
     s_phase_ms = 0u;
     s_offline_ms = 0u;
     s_last_upload_ms = 0u;
+    app_pair_mark_ui_dirty();
     CLOUD_TRACE_MSG("[CLOUD] session wifi down\r\n");
 }
 
@@ -81,6 +83,7 @@ void app_cloud_session_poll(void)
         if(cloud_aliyun_at_is_online() != 0u) {
             s_st = SESS_ONLINE;
             s_offline_ms = 0u;
+            app_pair_mark_ui_dirty();
             CLOUD_TRACE_MSG("[CLOUD] session online (persistent)\r\n");
             CLOUD_DBG("session online persistent pend=%u",
                       (unsigned)app_unlock_flash_count());
@@ -109,6 +112,7 @@ void app_cloud_session_poll(void)
         if(cloud_aliyun_at_is_online() != 0u) {
             s_st = SESS_ONLINE;
             s_offline_ms = 0u;
+            app_pair_mark_ui_dirty();
             CLOUD_DBG("session MQTT online persistent");
             cloud_ota_service_flush_unlock_pending();
             break;
@@ -134,6 +138,7 @@ void app_cloud_session_poll(void)
                app_unlock_flash_count() > 0u &&
                (s_last_upload_ms == 0u ||
                 (now - s_last_upload_ms) >= CLOUD_SESSION_UPLOAD_GAP_MS)) {
+                cloud_ota_service_flush_property_retry();
                 (void)app_unlock_flash_upload_next(cloud_session_publish_cb, NULL);
                 s_last_upload_ms = now;
             }

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 21 px
  * Bpp: 4
- * Opts: --font D:\keil project\modelkey\Host\guider\tools\NotoSansSC-wifi.ttf --size 21 --bpp 4 --format lvgl --no-compress --no-prefilter --no-kerning --symbols 12345.增加删除用户查找更改显示所有设置网络WiFi名称密码请输入已保存正在重连接成功失败扫描未扫到热点中： --lv-font-name lv_font_cn_wifi_21 -o d:\keil project\modelkey\Host\guider\generated\guider_fonts\lv_font_cn_wifi_21.c
+ * Opts: --font D:\keil project\modelkey\Host\guider\tools\NotoSansSC-wifi.ttf --size 21 --bpp 4 --format lvgl --no-compress --no-prefilter --no-kerning --symbols 0123456.AppWiFi增加删除用户查找更改显示所有设置网络配对已绑定重新生成码名称密码请输入保存正在连接成功失败扫描未到热点中： --lv-font-name lv_font_cn_wifi_21 -o d:\keil project\modelkey\Host\guider\generated\guider_fonts\lv_font_cn_wifi_21.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
@@ -570,6 +570,8 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
  *  PUBLIC FONT
  *----------------*/
 
+LV_FONT_DECLARE(lv_font_cn_pair_21);
+
 /*Initialize a public general font descriptor*/
 #if LVGL_VERSION_MAJOR >= 8
 const lv_font_t lv_font_cn_wifi_21 = {
@@ -589,7 +591,7 @@ lv_font_t lv_font_cn_wifi_21 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = NULL,
+    .fallback = &lv_font_cn_pair_21,
 #endif
     .user_data = NULL,
 };

@@ -25,6 +25,7 @@
 #include "../Drivers/BSP/W25Q16/bsp_w25q16.h"
 #include "app_unlock_uart4.h"
 #include "app_unlock_event.h"
+#include "app_screen_auth.h"
 #include "app_home_unlock.h"
 #include "app_home_full_hint.h"
 #include "app_wifi_scan.h"
@@ -92,9 +93,25 @@ static void app_gui_task(void *argument)
         app_home_unlock_housekeeping();
 
         if(g_screen3_need_init && lv_scr_act() == guider_ui.screen_3) {
+            screen3_init_scroll_layout();
             screen3_apply_uniform_menu_style();
             screen3_set_menu_selected(g_screen3_pending_index);
+            screen3_scroll_to_item(g_screen3_pending_index);
             g_screen3_need_init = 0u;
+        }
+        if(g_pair_ui_dirty != 0u) {
+            g_pair_ui_dirty = 0u;
+            if(screen_pair_is_open()) {
+                screen_pair_refresh();
+            }
+        }
+        if(screen_pair_is_open()) {
+            static uint32_t s_pair_poll_ms = 0u;
+            uint32_t now_ms = HAL_GetTick();
+            if((now_ms - s_pair_poll_ms) >= 500u) {
+                screen_pair_refresh();
+                s_pair_poll_ms = now_ms;
+            }
         }
         if(g_screen4_need_init && g_app_scr == APP_SCR_4) {
             screen4_refresh_table();
@@ -129,6 +146,7 @@ static void app_gui_task(void *argument)
         app_unlock_event_gui_pump();
         app_home_full_hint_update();
         screen1_cursor_blink_handle();
+        screen1_lockout_poll();
         screen2_cursor_blink_handle();
         screen5_cursor_blink_handle();
         screen6_dlg_cursor_blink_handle();

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>账号与安全 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+const s = jzLoadSettings();
+initSettingsPage('账号与安全', 'profile.html', `
+  ${renderSettingsGroup([
+    ['#', 'fa-mobile-screen', '手机号', '138****8000', null],
+    ['#', 'fa-lock', '登录密码', '已设置', null],
+    [jzHref('unlock_settings.html', 'profile'), 'fa-shield-halved', '远程开锁验证', s.unlockSecondAuth ? '二次验证已开启' : '未开启', null],
+    ['#', 'fa-laptop', '登录设备', '本机 · 1 台在线', null],
+  ])}
+  ${renderHint('远程开锁验证和临时密码，请在「远程开锁设置」中调整。')}
+`, { backAnchor: 'profile' });
+});
+</script>
+</body>
+</html>

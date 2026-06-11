@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设备详情 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+initSettingsPage('设备详情', jzResolveBack('devices.html'), `
+  <div class="bg-white rounded-2xl overflow-hidden shadow-card-lg border border-ycu-teal/10">
+    ${renderLockImage('w-full h-44')}
+    <div class="p-4">
+      <h2 class="text-lg font-bold text-ycu-navy">实验室智能门锁</h2>
+      <p class="text-sm text-slate-500 mt-1">支持密码、刷卡、指纹和手机远程开锁</p>
+      <div class="flex gap-2 mt-3 items-center">
+        <span id="deviceMainPresence"></span>
+        <span class="px-2 py-1 rounded-lg bg-ycu-teal-light text-ycu-teal-dark text-xs">已上锁</span>
+      </div>
+    </div>
+  </div>
+  ${renderSettingsGroup([
+    [jzHref('device_host.html', 'device_detail'), 'fa-tablet-screen-button', '门锁主屏', '触屏 · 刷卡 · 指纹 · <span id="deviceHostPresence">检测中…</span>', null],
+    [jzHref('device_client.html', 'device_detail'), 'fa-microchip', '侧门读卡器', '刷卡 · 指纹 · <span id="deviceClientPresence">检测中…</span>', null],
+    [jzHref('app_bind.html', 'device_detail'), 'fa-link', 'App 绑定', '配对码绑定本机', null],
+    [jzHref('mqtt_settings.html', 'device_detail'), 'fa-cloud', '云服务', '<span id="deviceCloudSub">检测中…</span>', null],
+  ])}
+  <a href="${jzHref('unlock.html', 'device_detail')}" class="block w-full py-3.5 rounded-2xl bg-gradient-to-r from-ycu-teal to-ycu-teal-dark text-white text-center font-semibold shadow-card">远程开锁</a>
+  <a href="records.html" class="block w-full py-3 rounded-2xl bg-white text-ycu-teal-dark text-center text-sm font-medium shadow-card border border-ycu-teal/20">查看开锁记录</a>
+`);
+jzWatchDevicePresence();
+</script>
+</body>
+</html>

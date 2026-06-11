@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>通知详情 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  const id = new URLSearchParams(location.search).get('id');
+  await jzFetchNotifications({ baseline: false });
+  const n = jzNotifyFromCache().find((x) => x.id === id);
+
+  if (!n) {
+    initSettingsPage('通知详情', jzResolveBack('notifications.html'), `
+      <div class="bg-white rounded-2xl p-8 shadow-card text-center text-slate-400 text-sm">通知不存在或已过期</div>
+    `);
+    return;
+  }
+
+  const read = new Set(jzLoadSettings().notifyReadIds || []);
+  read.add(n.id);
+  jzSaveSettings({ notifyReadIds: [...read] });
+  jzEmitNotifyChanged();
+
+  const recordBtn = n.recordId
+    ? `<a href="${jzHref('record_detail.html?id=' + encodeURIComponent(n.recordId), 'notification_detail')}" class="block w-full py-3 rounded-2xl bg-ycu-teal-light text-ycu-teal-dark text-center text-sm font-semibold">查看开锁记录</a>`
+    : '';
+
+  initSettingsPage('通知详情', jzResolveBack('notifications.html'), `
+    <div class="bg-white rounded-2xl p-5 shadow-card border border-slate-50">
+      <div class="flex items-start gap-3">
+        <div class="w-12 h-12 rounded-xl ${n.color} flex items-center justify-center flex-shrink-0"><i class="fa-solid ${n.icon}"></i></div>
+        <div class="min-w-0">
+          <h2 class="font-bold text-ycu-navy whitespace-nowrap">${n.title}</h2>
+          <p class="text-sm text-slate-400 mt-1 whitespace-nowrap">${n.time}</p>
+        </div>
+      </div>
+      <p class="text-sm text-slate-600 mt-4">${n.desc}</p>
+    </div>
+    ${recordBtn}
+    <a href="${jzHref('notify_settings.html', 'notification_detail')}" class="block w-full py-3 text-center text-sm text-slate-400">消息通知设置</a>
+  `);
+});
+</script>
+</body>
+</html>

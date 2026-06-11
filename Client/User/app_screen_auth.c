@@ -1,10 +1,31 @@
 #include "app_screen_auth.h"
+#include "app_temp_password.h"
+
+#include <stdio.h>
+#include <string.h>
 
 #include "lvgl.h"
 #include "gui_guider.h"
 #include "app_screen.h"
 #include "ui_common_utils.h"
 #include "ui_auth_input.h"
+#include "app_user_ops.h"
+#include "app_unlock_event.h"
+#include "app_config.h"
+#include "stm32f4xx_hal.h"
+#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_SLAVE
+#include "app_rs485_proto.h"
+#endif
+
+#define SCREEN1_LOCKOUT_FAIL_LIMIT   5u
+#define SCREEN1_LOCKOUT_DURATION_MS  60000u
+#define SCREEN1_LOCKOUT_DEVICE_ID    2u
+
+static uint8_t s_screen1_fail_streak;
+static uint32_t s_screen1_lock_until_ms;
+static char s_screen1_last_fail_acc[13];
+static uint8_t s_screen1_alert_pending;
+static uint32_t s_screen1_lockout_ui_ms;
 
 extern lv_ui guider_ui;
 extern app_scr_t g_app_scr;
@@ -66,13 +87,131 @@ void screen1_hide_error_label(void)
 
 void screen1_show_error_label(void)
 {
+    if(!lv_obj_is_valid(guider_ui.screen_1_label_3)) {
+        return;
+    }
+    lv_label_set_text(guider_ui.screen_1_label_3, "\xE8\xBE\x93\xE5\x85\xA5\xE9\x94\x99\xE8\xAF\xAF");
     ui_label_set_hidden(guider_ui.screen_1_label_3, 0u);
+}
+
+void screen1_show_lockout_label(uint32_t remain_sec)
+{
+    char txt[32];
+
+    if(!lv_obj_is_valid(guider_ui.screen_1_label_3)) {
+        return;
+    }
+    if(remain_sec == 0u) {
+        remain_sec = 1u;
+    }
+    (void)snprintf(txt, sizeof(txt), "%lu:%02lu",
+                   (unsigned long)(remain_sec / 60u),
+                   (unsigned long)(remain_sec % 60u));
+    lv_label_set_text(guider_ui.screen_1_label_3, txt);
+    ui_label_set_hidden(guider_ui.screen_1_label_3, 0u);
+}
+
+uint8_t screen1_is_lockout_active(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if(s_screen1_lock_until_ms != 0u && now >= s_screen1_lock_until_ms) {
+        s_screen1_lock_until_ms = 0u;
+        s_screen1_fail_streak = 0u;
+        screen1_hide_error_label();
+    }
+    return (s_screen1_lock_until_ms != 0u && now < s_screen1_lock_until_ms) ? 1u : 0u;
+}
+
+static void screen1_lockout_fire_alert(void)
+{
+#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_SLAVE
+    if(s_screen1_alert_pending == 0u) {
+        return;
+    }
+    s_screen1_alert_pending = 0u;
+    app_rs485_slave_lockout_alert_async(s_screen1_last_fail_acc);
+#endif
+}
+
+void screen1_lockout_poll(void)
+{
+    uint32_t now;
+    uint32_t remain;
+
+    if(g_app_scr != APP_SCR_1) {
+        return;
+    }
+    if(screen1_is_lockout_active() == 0u) {
+        screen1_lockout_fire_alert();
+        return;
+    }
+    now = HAL_GetTick();
+    remain = (s_screen1_lock_until_ms - now + 999u) / 1000u;
+    if((now - s_screen1_lockout_ui_ms) >= 1000u) {
+        s_screen1_lockout_ui_ms = now;
+        screen1_show_lockout_label(remain);
+    }
+}
+
+uint8_t screen1_try_password_unlock(void)
+{
+    const char *acc;
+    const char *pwd;
+    uint32_t now;
+
+    if(screen1_is_lockout_active() != 0u) {
+        return 2u;
+    }
+
+    acc = lv_textarea_get_text(guider_ui.screen_1_ta_1);
+    pwd = lv_textarea_get_text(guider_ui.screen_1_ta_2);
+    if(app_temp_password_try_unlock(acc, pwd) != 0u) {
+        s_screen1_fail_streak = 0u;
+        s_screen1_lock_until_ms = 0u;
+        s_screen1_alert_pending = 0u;
+        screen1_hide_error_label();
+        app_unlock_event_handle_success(APP_UNLOCK_POPUP_SCREEN1, "temporary account", "temporary-password");
+        return 1u;
+    }
+    if(unlock_credentials_match_with_delete(acc, pwd)) {
+        s_screen1_fail_streak = 0u;
+        s_screen1_lock_until_ms = 0u;
+        s_screen1_alert_pending = 0u;
+        screen1_hide_error_label();
+        app_unlock_event_handle_success(APP_UNLOCK_POPUP_SCREEN1, acc, "password");
+        return 1u;
+    }
+
+    now = HAL_GetTick();
+    if(acc != NULL) {
+        strncpy(s_screen1_last_fail_acc, acc, sizeof(s_screen1_last_fail_acc) - 1u);
+        s_screen1_last_fail_acc[sizeof(s_screen1_last_fail_acc) - 1u] = '\0';
+    }
+    s_screen1_fail_streak++;
+    if(s_screen1_fail_streak >= SCREEN1_LOCKOUT_FAIL_LIMIT) {
+        s_screen1_fail_streak = 0u;
+        s_screen1_lock_until_ms = now + SCREEN1_LOCKOUT_DURATION_MS;
+        s_screen1_alert_pending = 1u;
+        s_screen1_lockout_ui_ms = now;
+        screen1_show_lockout_label(SCREEN1_LOCKOUT_DURATION_MS / 1000u);
+        screen1_lockout_fire_alert();
+        return 2u;
+    }
+    screen1_show_error_label();
+    return 0u;
 }
 
 void screen1_handle_input_key(KeyValue_t key)
 {
-    lv_obj_t *ta = screen1_get_field_by_index(g_screen1_field_index);
-    uint16_t max_len = screen1_get_field_max_len(g_screen1_field_index);
+    lv_obj_t *ta;
+    uint16_t max_len;
+
+    if(screen1_is_lockout_active() != 0u) {
+        return;
+    }
+    ta = screen1_get_field_by_index(g_screen1_field_index);
+    max_len = screen1_get_field_max_len(g_screen1_field_index);
     ui_auth_handle_input_key(ta, key, max_len, screen1_hide_error_label, screen1_update_cursor_pos);
 }
 

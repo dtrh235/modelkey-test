@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>主题与显示 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  let mode = jzLoadSettings().uiMode;
+
+  const modeCards = Object.entries(JZ_UI_MODES).map(([key, v]) => `
+    <button type="button" data-mode="${key}" class="mode-pick w-full text-left p-4 rounded-2xl border-2 transition-all ${key === mode ? 'border-ycu-teal bg-ycu-teal-light shadow-card' : 'border-slate-100 bg-white'}">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-ycu-teal to-ycu-blue flex items-center justify-center text-white">
+          <i class="fa-solid ${key === 'senior' ? 'fa-glasses' : key === 'adult' ? 'fa-briefcase' : 'fa-leaf'}"></i>
+        </div>
+        <div class="flex-1">
+          <p class="font-semibold text-ycu-navy">${v.label}</p>
+          <p class="text-xs text-slate-400 mt-0.5 leading-snug">${v.desc}</p>
+        </div>
+        ${key === mode ? '<i class="fa-solid fa-circle-check text-ycu-teal-dark"></i>' : ''}
+      </div>
+    </button>`).join('');
+
+  initSettingsPage('主题与显示', 'profile.html', `
+    ${renderSectionLabel('界面模式')}
+    <div class="space-y-2" id="modeList">${modeCards}</div>
+    ${renderSectionLabel('主题色')}
+    <div class="grid grid-cols-2 gap-3">
+      <div class="p-4 rounded-2xl border-2 border-ycu-teal bg-ycu-teal-light shadow-card">
+        <div class="h-8 rounded-lg bg-gradient-to-r from-ycu-teal-light to-ycu-teal mb-2"></div>
+        <p class="text-sm font-semibold text-ycu-navy">清新青绿</p>
+        <p class="text-[10px] text-ycu-teal-dark">当前 · 宜春学院</p>
+      </div>
+      <div class="p-4 rounded-2xl border border-slate-100 bg-white opacity-50">
+        <div class="h-8 rounded-lg bg-slate-100 mb-2"></div>
+        <p class="text-sm text-slate-400">深色模式</p>
+        <p class="text-[10px] text-slate-300">后续版本</p>
+      </div>
+    </div>
+    ${renderHint('老年模式会放大字号和按钮，方便长辈使用。')}
+    <button type="button" id="saveTheme" class="w-full py-3.5 rounded-2xl bg-ycu-teal-dark text-white font-semibold shadow-card">应用并保存</button>
+  `, { backAnchor: 'profile' });
+
+  document.querySelectorAll('.mode-pick').forEach((btn) => {
+    btn.onclick = () => {
+      mode = btn.dataset.mode;
+      jzApplyUiMode(mode);
+      document.querySelectorAll('.mode-pick').forEach((b) => {
+        b.className = 'mode-pick w-full text-left p-4 rounded-2xl border-2 border-slate-100 bg-white transition-all';
+      });
+      btn.className = 'mode-pick w-full text-left p-4 rounded-2xl border-2 border-ycu-teal bg-ycu-teal-light shadow-card transition-all';
+    };
+  });
+
+  document.getElementById('saveTheme').onclick = () => {
+    jzSaveSettings({ uiMode: mode, theme: 'fresh' });
+    showToast(`已切换为${jzUiModeLabel(mode)}`);
+    setTimeout(() => { location.href = 'profile.html'; }, 600);
+  };
+});
+</script>
+</body>
+</html>

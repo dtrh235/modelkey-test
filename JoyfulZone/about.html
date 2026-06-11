@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>关于 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+initSettingsPage('关于', 'profile.html', `
+  <div class="text-center py-6">
+    <img src="${JZ_IMG.emblem}" class="w-20 h-20 rounded-full mx-auto bg-white p-1 shadow-card ring-2 ring-ycu-teal/20" alt="">
+    <h2 class="text-xl font-bold text-ycu-navy mt-4">Joyful Zone</h2>
+    <p class="text-sm text-slate-400 mt-1">v1.0.0 · 宜春学院智能门禁</p>
+  </div>
+  <p class="jz-page-desc text-sm text-slate-500 text-center max-w-[280px] mx-auto">支持密码、刷卡、指纹和手机远程开锁。</p>
+  ${renderSettingsGroup([
+    [jzHref('agreement.html', 'profile'),'fa-file-contract','用户协议',null,null],
+  ])}
+`, { backAnchor: 'profile' });
+</script>
+</body>
+</html>

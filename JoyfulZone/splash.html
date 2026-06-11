@@ -1,0 +1,44 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>启动页 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  initAndroidPhone(`
+    <div class="flex-1 flex flex-col items-center justify-center bg-gradient-to-b from-ycu-teal to-ycu-teal-dark text-white px-8 text-center relative overflow-hidden">
+      <div class="absolute -top-20 -right-20 w-56 h-56 rounded-full bg-white/5"></div>
+      <div class="absolute bottom-32 -left-16 w-40 h-40 rounded-full bg-ycu-gold/10"></div>
+      <img src="assets/ycu_emblem.png" alt="宜春学院" class="w-28 h-28 rounded-full bg-white p-1 shadow-xl ring-4 ring-white/30 mb-6 relative z-10">
+      <h1 class="text-2xl font-bold tracking-wide relative z-10">Joyful Zone</h1>
+      <p class="text-white/80 text-sm mt-2 relative z-10">宜春学院 · 智能门禁</p>
+      <p class="text-white/50 text-xs mt-8 relative z-10">安全 · 便捷 · 愉悦通行</p>
+      <div class="mt-12 w-8 h-8 border-2 border-white/40 border-t-white rounded-full animate-spin relative z-10"></div>
+    </div>
+  `);
+  const minDelay = new Promise((r) => setTimeout(r, 1800));
+  const syncTask = jzDeviceBindInfo()
+    ? jzSyncDeviceBindStatus().catch(() => ({}))
+    : Promise.resolve();
+  Promise.all([minDelay, syncTask]).then(() => {
+    const onboarded = localStorage.getItem('jzOnboardingDone') === '1';
+    if (!onboarded) {
+      location.href = 'onboarding.html';
+    } else if (jzDeviceBindInfo()) {
+      location.href = 'home.html';
+    } else {
+      location.href = 'home.html';
+    }
+  });
+});
+</script>
+</body>
+</html>

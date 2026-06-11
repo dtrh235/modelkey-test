@@ -17,10 +17,11 @@
 #define UNLOCK_FLASH_FULL_THRESH (UNLOCK_FLASH_MAX_RECS)
 
 typedef struct {
-    char account[13];
+    char account[24];
     uint8_t method_code;
     uint8_t device_code;
-    uint16_t reserved;
+    uint8_t bridge_done;
+    uint8_t reserved;
     uint32_t unlock_time_sec;
     uint32_t uptime_sec;
     uint32_t seq;
@@ -127,8 +128,9 @@ uint8_t app_unlock_flash_is_nearly_full(void)
     return (s_blob.count >= UNLOCK_FLASH_FULL_THRESH) ? 1u : 0u;
 }
 
-void app_unlock_flash_append(const char *account, uint8_t method_code, uint8_t device_code,
-                             uint32_t unlock_time_sec, uint32_t uptime_sec, uint32_t seq)
+static void unlock_flash_append_internal(const char *account, uint8_t method_code,
+                                         uint8_t device_code, uint32_t unlock_time_sec,
+                                         uint32_t uptime_sec, uint32_t seq, uint8_t bridge_done)
 {
     unlock_flash_rec_t *slot;
 
@@ -154,6 +156,7 @@ void app_unlock_flash_append(const char *account, uint8_t method_code, uint8_t d
     }
     slot->method_code = method_code;
     slot->device_code = device_code;
+    slot->bridge_done = bridge_done;
     slot->unlock_time_sec = unlock_time_sec;
     slot->uptime_sec = uptime_sec;
     slot->seq = (seq != 0u) ? seq : s_blob.next_seq++;
@@ -169,18 +172,73 @@ void app_unlock_flash_append(const char *account, uint8_t method_code, uint8_t d
     }
 }
 
-uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *ctx), void *ctx)
+void app_unlock_flash_append(const char *account, uint8_t method_code, uint8_t device_code,
+                             uint32_t unlock_time_sec, uint32_t uptime_sec, uint32_t seq)
+{
+    unlock_flash_append_internal(account, method_code, device_code, unlock_time_sec, uptime_sec,
+                                 seq, 0u);
+}
+
+void app_unlock_flash_append_bridge_done(const char *account, uint8_t method_code,
+                                         uint8_t device_code, uint32_t unlock_time_sec,
+                                         uint32_t uptime_sec, uint32_t seq)
+{
+    unlock_flash_append_internal(account, method_code, device_code, unlock_time_sec, uptime_sec,
+                                 seq, 1u);
+}
+
+void app_unlock_flash_drop_seq(uint32_t seq)
+{
+    uint16_t i;
+
+    if(seq == 0u) {
+        return;
+    }
+    flash_load();
+    for(i = 0u; i < s_blob.count; i++) {
+        if(s_blob.recs[i].seq != seq) {
+            continue;
+        }
+        if(s_blob.count > (uint16_t)(i + 1u)) {
+            memmove(&s_blob.recs[i], &s_blob.recs[i + 1u],
+                    sizeof(s_blob.recs[0]) * (size_t)(s_blob.count - (uint16_t)(i + 1u)));
+        }
+        s_blob.count--;
+        (void)flash_persist();
+        return;
+    }
+}
+
+static int16_t unlock_flash_find_index(uint8_t bridge_done_only)
+{
+    uint16_t i;
+
+    for(i = 0u; i < s_blob.count; i++) {
+        if(s_blob.recs[i].bridge_done == bridge_done_only) {
+            return (int16_t)i;
+        }
+    }
+    return -1;
+}
+
+static uint8_t unlock_flash_upload_one(int (*publish_fn)(const char *json, void *ctx), void *ctx,
+                                       uint8_t bridge_done_only)
 {
     unlock_flash_rec_t rec;
     char payload[384];
     char time_txt[24];
+    int16_t idx;
     int rc;
 
     flash_load();
     if(s_blob.count == 0u || publish_fn == NULL) {
         return 0u;
     }
-    rec = s_blob.recs[0];
+    idx = unlock_flash_find_index(bridge_done_only);
+    if(idx < 0) {
+        return 0u;
+    }
+    rec = s_blob.recs[(uint16_t)idx];
     if(cloud_aliyun_at_time_is_synced() == 0u || app_wall_clock_valid() == 0u) {
         return 0u;
     }
@@ -200,11 +258,22 @@ uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *c
         return 0u;
     }
     WIFI_DBG("unlock flash pub ok seq=%lu", (unsigned long)rec.seq);
-    if(s_blob.count > 1u) {
-        memmove(&s_blob.recs[0], &s_blob.recs[1],
-                sizeof(s_blob.recs[0]) * (size_t)(s_blob.count - 1u));
+    if(s_blob.count > (uint16_t)(idx + 1)) {
+        memmove(&s_blob.recs[(uint16_t)idx], &s_blob.recs[(uint16_t)(idx + 1)],
+                sizeof(s_blob.recs[0]) * (size_t)(s_blob.count - (uint16_t)(idx + 1u)));
     }
     s_blob.count--;
     (void)flash_persist();
     return 1u;
+}
+
+uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *ctx), void *ctx)
+{
+    return unlock_flash_upload_one(publish_fn, ctx, 0u);
+}
+
+uint8_t app_unlock_flash_upload_next_property(int (*publish_fn)(const char *json, void *ctx),
+                                              void *ctx)
+{
+    return unlock_flash_upload_one(publish_fn, ctx, 1u);
 }

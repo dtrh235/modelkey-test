@@ -5,6 +5,8 @@
 
 | 版本 | Git 标签 | 提交 | 日期 | 一句话 |
 |------|----------|------|------|--------|
+| **v1.5.0** | `v1.5.0` | （本提交） | 2026-06-11 | JoyfulZone App/后端、配对与临时密码、物模型上报去重与补发 |
+| **v1.4.0** | `v1.4.0` | `23fc816` | 2026-06-10 | 从机 RS485 开锁上云、文档整理 |
 | **v1.3.0** | `v1.3.0` | `73dda2e` | 2026-06-01 | 恢复 NFC/指纹、云端解锁时间格式、WiFi 连接 UI、NFC 硬件测试工程 |
 | **v1.2.0** | `v1.2.0` | `d94ebe4` | 2026-06-01 | WiFi 扫描/连接稳定性、校时后再上传解锁记录、用户管理调整 |
 | **v1.1.0** | `v1.1.0` | `ed081b3` | 2026-06-01 | MQTT 对时（r110 方案）、WiFi 后不再被 SNTP 卡 UI |
@@ -12,7 +14,51 @@
 
 ---
 
-## v1.3.0（当前 main）
+## v1.5.0（当前 main）
+
+**适用场景：** 手机 App 绑定门锁、远程/临时密码开锁、用户管理同步、主机本地开锁可靠上报阿里云物模型。
+
+### 新增
+- **`JoyfulZone/`**：手机 App 原型（HTML + `shared.js`）、Node.js MQTT 桥接后端、Capacitor 打包脚本。
+- **配对绑定**：`app_pair_bind`、`app_screen_pair_flow`；App `POST /devices/bind` 六位数配对码。
+- **临时密码**：Host/Client `app_temp_password`；App 生成/作废；开锁后 `temp_password_used` + `guest_account` 上报。
+- **云指令桥**：`app_cloud_bind_cmd`、`app_cloud_command`（用户同步、远程开锁、在线心跳）。
+- **学习资料**：`学习/` 目录（课程大纲、30 课笔记、FreeRTOS 实验）。
+
+### 改进（固件 Host）
+- **物模型上报**：桥接 `unlock_record` 与 `property/post` 分离；RAM 重试 + Flash 失败备份；MQTT 重连不清队列；同 `seq` 去重，修复「开一次锁阿里云两条」。
+- **主机本地开锁**：`post_reply` 确认；UART 错峰 400ms；`unlock_account` 携带真实账号（不再只有 `temporary account`）。
+- **MQTT 稳定性**：`CIPSEND` 失败不踢整条会话；`user_list` 8s 防抖；`sync_users` 风暴抑制。
+- **解锁热路径**：GUI 线程只入队，云上报在 `cloud_ota_service_poll_5ms` 执行。
+
+### 改进（JoyfulZone App / 后端）
+- 门锁三态在线（在线 / 同步中 / 离线仍可见）；临时密码 2s 轮询；作废后写回本地缓存。
+- 用户详情页修复无限刷新；删除用户后 `user_changed` 先于 `user_list` 处理。
+- `unlock_record` method=5 时自动作废唯一有效临时密码；OpenAPI 拉物模型历史补 App 记录。
+
+### 配置
+- 物模型 `unlock_method` 需含枚举 **5 = 临时密码**（阿里云产品控制台）。
+- 后端 `.env` 填服务器设备密钥；Topic 与流转见 `JoyfulZone/server/TOPIC_SETUP.md`。
+
+### 主要改动文件
+`cloud_ota_service.c`、`cloud_aliyun_at.c`、`app_unlock_flash_queue.c`、`app_cloud_bind_cmd.c`、`JoyfulZone/shared.js`、`JoyfulZone/server/src/services/aliyunMqtt.js`
+
+---
+
+## v1.4.0
+
+**适用场景：** 从机侧门 NFC/密码开锁需要同步到 Host 云端。
+
+### 改进
+- **从机 RS485**：开锁事件经 Host 转发 `unlock_record` / 物模型。
+- 文档与工程清理。
+
+### 主要改动文件
+`Host/User/app_rs485_proto.c`、`Client/User/app_rs485_proto.c`
+
+---
+
+## v1.3.0
 
 **适用场景：** 需要 NFC/指纹联调、阿里云解锁记录带可读时间、单独验证 NFC+RS485 硬件。
 

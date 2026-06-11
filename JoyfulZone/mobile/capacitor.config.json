@@ -1,0 +1,11 @@
+{
+  "appId": "edu.ycu.joyfulzone",
+  "appName": "Joyful Zone",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}

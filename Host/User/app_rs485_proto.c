@@ -16,6 +16,7 @@
 #include "cloud_ota_service.h"
 #include "app_user_ops.h"
 #include "app_fp_host_match.h"
+#include "app_pair_bind.h"
 #endif
 
 #if (APP_USE_FREERTOS == 1)
@@ -30,7 +31,10 @@
 #define RS485_CRC_LEN   2u
 
 #define RS485_CMD_SLAVE_UNLOCK_NOTIFY 0x10u
+#define RS485_CMD_SLAVE_LOCKOUT_ALERT 0x11u
 #define RS485_CMD_MIRROR_SYNC_REQ     0x04u
+#define RS485_CMD_TEMP_PWD_SET        0x06u
+#define RS485_CMD_TEMP_PWD_REVOKE     0x07u
 
 #if APP_RS485_IS_MASTER
 static volatile uint8_t s_mirror_sync_pending;
@@ -354,6 +358,14 @@ static uint8_t rs485_handle_unsolicited_master_frame(const uint8_t *rxb, uint16_
         (void)rs485_send_reply(seq, (uint8_t)(RS485_CMD_SLAVE_UNLOCK_NOTIFY | 0x80u), 0u);
         return 1u;
     }
+    if(cmd == RS485_CMD_SLAVE_LOCKOUT_ALERT && plen >= 13u) {
+        char acc[13];
+        memcpy(acc, pl + 1u, 12u);
+        acc[12] = '\0';
+        app_pair_publish_unlock_alert(pl[0], acc);
+        (void)rs485_send_reply(seq, (uint8_t)(RS485_CMD_SLAVE_LOCKOUT_ALERT | 0x80u), 0u);
+        return 1u;
+    }
     if(cmd == RS485_CMD_FP_MATCH_CHAR && plen == (uint16_t)sizeof(rs485_fp_char_chunk_t)) {
         const rs485_fp_char_chunk_t *ch = (const rs485_fp_char_chunk_t *)pl;
         rs485_fp_match_rsp_t mrsp;
@@ -636,6 +648,36 @@ bool app_rs485_proto_slave_unlock_notify(const char *acc, uint8_t method_id, uin
     }
     return rs485_do_cmd(RS485_CMD_SLAVE_UNLOCK_NOTIFY, (const uint8_t *)&un,
                         (uint16_t)sizeof(un), tout_ms);
+}
+
+bool app_rs485_proto_slave_temp_password_set(const char *account, const char *password,
+                                             uint32_t valid_sec, uint32_t tout_ms)
+{
+    uint8_t pl[16];
+
+    if(account == NULL || password == NULL) {
+        return false;
+    }
+    memset(pl, 0, sizeof(pl));
+    strncpy((char *)pl, account, 4u);
+    strncpy((char *)(pl + 5u), password, 6u);
+    pl[12] = (uint8_t)(valid_sec & 0xFFu);
+    pl[13] = (uint8_t)((valid_sec >> 8) & 0xFFu);
+    pl[14] = (uint8_t)((valid_sec >> 16) & 0xFFu);
+    pl[15] = (uint8_t)((valid_sec >> 24) & 0xFFu);
+    return rs485_do_cmd(RS485_CMD_TEMP_PWD_SET, pl, (uint16_t)sizeof(pl), tout_ms);
+}
+
+bool app_rs485_proto_slave_temp_password_revoke(const char *account, uint32_t tout_ms)
+{
+    uint8_t pl[5];
+
+    if(account == NULL) {
+        return false;
+    }
+    memset(pl, 0, sizeof(pl));
+    strncpy((char *)pl, account, 4u);
+    return rs485_do_cmd(RS485_CMD_TEMP_PWD_REVOKE, pl, (uint16_t)sizeof(pl), tout_ms);
 }
 
 #if APP_RS485_IS_MASTER

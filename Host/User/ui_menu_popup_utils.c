@@ -2,33 +2,37 @@
 
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_21);
 
-lv_obj_t *ui_menu_btn_by_index5(lv_obj_t *btn0, lv_obj_t *btn1, lv_obj_t *btn2, lv_obj_t *btn3, lv_obj_t *btn4,
-                                uint8_t idx)
+lv_obj_t *ui_menu_btn_by_index6(lv_obj_t *btn0, lv_obj_t *btn1, lv_obj_t *btn2, lv_obj_t *btn3, lv_obj_t *btn4,
+                                lv_obj_t *btn5, uint8_t idx)
 {
     switch(idx) {
     case 0u: return btn0;
     case 1u: return btn1;
     case 2u: return btn2;
     case 3u: return btn3;
-    default: return btn4;
+    case 4u: return btn4;
+    default: return btn5;
     }
 }
 
-lv_obj_t *ui_menu_label_by_index5(lv_obj_t *lbl0, lv_obj_t *lbl1, lv_obj_t *lbl2, lv_obj_t *lbl3, lv_obj_t *lbl4,
-                                  uint8_t idx)
+lv_obj_t *ui_menu_label_by_index6(lv_obj_t *lbl0, lv_obj_t *lbl1, lv_obj_t *lbl2, lv_obj_t *lbl3, lv_obj_t *lbl4,
+                                  lv_obj_t *lbl5, uint8_t idx)
 {
     switch(idx) {
     case 0u: return lbl0;
     case 1u: return lbl1;
     case 2u: return lbl2;
     case 3u: return lbl3;
-    default: return lbl4;
+    case 4u: return lbl4;
+    default: return lbl5;
     }
 }
 
 void ui_screen3_set_menu_selected(uint8_t idx, uint8_t *menu_index,
                                   lv_obj_t *btn0, lv_obj_t *btn1, lv_obj_t *btn2, lv_obj_t *btn3, lv_obj_t *btn4,
-                                  lv_obj_t *lbl0, lv_obj_t *lbl1, lv_obj_t *lbl2, lv_obj_t *lbl3, lv_obj_t *lbl4)
+                                  lv_obj_t *btn5,
+                                  lv_obj_t *lbl0, lv_obj_t *lbl1, lv_obj_t *lbl2, lv_obj_t *lbl3, lv_obj_t *lbl4,
+                                  lv_obj_t *lbl5)
 {
     uint8_t i;
     lv_obj_t *btn;
@@ -43,8 +47,8 @@ void ui_screen3_set_menu_selected(uint8_t idx, uint8_t *menu_index,
     *menu_index = idx;
 
     for(i = 0u; i < SCREEN3_MENU_ITEM_COUNT; i++) {
-        btn = ui_menu_btn_by_index5(btn0, btn1, btn2, btn3, btn4, i);
-        lbl = ui_menu_label_by_index5(lbl0, lbl1, lbl2, lbl3, lbl4, i);
+        btn = ui_menu_btn_by_index6(btn0, btn1, btn2, btn3, btn4, btn5, i);
+        lbl = ui_menu_label_by_index6(lbl0, lbl1, lbl2, lbl3, lbl4, lbl5, i);
         if(!lv_obj_is_valid(btn) || !lv_obj_is_valid(lbl)) {
             continue;
         }

@@ -887,6 +887,7 @@ bool users_bind_nfc_by_acc(const char *acc, const uint8_t uid[4])
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
     users_mirror_schedule_acc(acc);
 #endif
+    cloud_ota_publish_user_changed("nfc_bind", acc);
     return true;
 }
 
@@ -1001,6 +1002,7 @@ bool users_bind_fp_by_acc_ex(const char *acc, uint16_t page_id, uint8_t schedule
         app_fp_mirror_tx_schedule_acc(acc);
     }
 #endif
+    cloud_ota_publish_user_changed("fp_bind", acc);
     return true;
 }
 
@@ -1069,7 +1071,9 @@ void users_clear_fp_by_acc(const char *acc, uint8_t clear_hw)
         if(have_usr_snap != 0u && idx_snap >= 0) {
             memcpy(&g_users[idx_snap], &usr_snap, sizeof(usr_snap));
         }
+        return;
     }
+    cloud_ota_publish_user_changed("fp_delete", acc);
 }
 
 void users_clear_nfc_by_acc(const char *acc)
@@ -1100,7 +1104,9 @@ void users_clear_nfc_by_acc(const char *acc)
         if(have_usr_snap != 0u && idx_snap >= 0) {
             memcpy(&g_users[idx_snap], &usr_snap, sizeof(usr_snap));
         }
+        return;
     }
+    cloud_ota_publish_user_changed("nfc_delete", acc);
 }
 
 bool admin_credentials_match(const char *acc, const char *pwd)
@@ -1272,6 +1278,45 @@ uint8_t users_migrate_default_admin_to_users(void)
     g_default_admin_account[0] = '\0';
     g_default_admin_password[0] = '\0';
     return 1u;
+}
+
+bool users_set_password_by_acc(const char *acc, const char *pwd)
+{
+    size_t len;
+    int idx;
+
+    if(acc == NULL || acc[0] == '\0' || pwd == NULL) {
+        return false;
+    }
+    len = strlen(pwd);
+    if(len < 4u || len > 10u) {
+        return false;
+    }
+
+    idx = users_find_index_by_acc(acc);
+    if(idx >= 0) {
+        strncpy(g_users[idx].pwd, pwd, sizeof(g_users[idx].pwd) - 1u);
+        g_users[idx].pwd[sizeof(g_users[idx].pwd) - 1u] = '\0';
+        (void)users_storage_save();
+#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
+        users_mirror_schedule_acc(acc);
+#endif
+        cloud_ota_service_report_event(CLOUD_EVT_USER_PWD_CHANGE_OK, acc);
+        return true;
+    }
+
+    if(!g_default_admin_deleted && strcmp(acc, g_default_admin_account) == 0) {
+        strncpy(g_default_admin_password, pwd, sizeof(g_default_admin_password) - 1u);
+        g_default_admin_password[sizeof(g_default_admin_password) - 1u] = '\0';
+        (void)users_storage_save();
+#if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
+        users_mirror_schedule_acc(acc);
+#endif
+        cloud_ota_service_report_event(CLOUD_EVT_USER_PWD_CHANGE_OK, acc);
+        return true;
+    }
+
+    return false;
 }
 
 bool users_try_delete_by_acc(const char *acc)

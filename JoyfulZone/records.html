@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>开锁记录 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+  <style>.hide-scroll::-webkit-scrollbar{display:none}</style>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  const filters = ['全部', '密码', 'NFC', '指纹', '手机', '临时'];
+  let records = jzUnlockRecordsFromCache();
+
+  initAndroidPhone(`
+    ${renderTabTopBar('开锁记录')}
+    <div class="px-4 py-2 flex gap-2 overflow-x-auto hide-scroll flex-shrink-0 bg-white border-b border-slate-50" id="filters"></div>
+    <p class="px-4 py-1.5 text-[10px] text-slate-400 bg-ycu-surface whitespace-nowrap">最近 ${JZ_RECORD_MONTHS} 个月</p>
+    <div class="flex-1 min-h-0 overflow-y-auto hide-scroll bg-white" id="list"></div>
+    ${renderBottomNav('records')}
+  `, { fullBleed: true });
+
+  const list = document.getElementById('list');
+  const filterBar = document.getElementById('filters');
+  let activeFilter = '全部';
+
+  filters.forEach((f, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = f;
+    btn.className = i === 0
+      ? 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-ycu-teal text-white'
+      : 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-500';
+    btn.onclick = () => {
+      activeFilter = f;
+      filterBar.querySelectorAll('.chip').forEach((b) => {
+        b.className = 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-500';
+      });
+      btn.className = 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-ycu-teal text-white';
+      renderList();
+    };
+    filterBar.appendChild(btn);
+  });
+
+  function recordRowHtml(r) {
+    return `
+      <a href="${jzHref('record_detail.html?id=' + encodeURIComponent(r.id), 'records')}" class="flex items-center gap-3 px-4 py-3 active:bg-ycu-teal-light/30">
+        <span class="w-11 flex-shrink-0 text-[11px] text-slate-400 tabular-nums text-right">${r.hm}</span>
+        <div class="flex-1 bg-ycu-surface/80 rounded-xl p-3 flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-ycu-teal-light text-ycu-teal-dark flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid ${lockMethodIcon(r.m)}"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-ycu-navy whitespace-nowrap overflow-hidden text-ellipsis">${jzRecordTitleLine(r)}</p>
+            <p class="text-[10px] text-slate-400 whitespace-nowrap overflow-hidden text-ellipsis">${r.d}</p>
+          </div>
+          <span class="text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0 ${r.ok ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}">${r.ok ? '成功' : '失败'}</span>
+          <i class="fa-solid fa-chevron-right text-slate-200 text-xs flex-shrink-0"></i>
+        </div>
+      </a>`;
+  }
+
+  function renderList() {
+    const views = records.map(jzRecordToView);
+    const data = activeFilter === '全部' ? views : views.filter((r) => r.m === activeFilter);
+    if (!data.length) {
+      list.innerHTML = `<div class="px-6 py-16 text-center text-slate-400 text-sm">暂无开锁记录</div>`;
+      return;
+    }
+    const groups = jzGroupRecordViewsByDay(data);
+    list.innerHTML = groups.map((g) => `
+      <section class="pb-1">
+        <div class="sticky top-0 z-10 px-4 py-2 bg-white/95 backdrop-blur border-b border-slate-50">
+          <h3 class="text-xs font-semibold text-slate-500">${g.label}</h3>
+        </div>
+        <div class="divide-y divide-slate-50/80">
+          ${g.items.map((r) => recordRowHtml(r)).join('')}
+        </div>
+      </section>`).join('');
+  }
+
+  async function loadRecords() {
+    records = await jzFetchUnlockRecords();
+    renderList();
+  }
+
+  renderList();
+
+  jzInitTabScroll('list', {
+    onRefresh: async () => {
+      records = await jzFetchUnlockRecords({ refresh: true });
+      renderList();
+    },
+  });
+
+  loadRecords();
+
+  jzWatchPageRefresh({
+    onResume: loadRecords,
+    onBindChange: (d) => {
+      if (!d.bound && d.cleared) {
+        records = [];
+        renderList();
+        return;
+      }
+      if (d.bound) loadRecords();
+    },
+  });
+});
+</script>
+</body>
+</html>

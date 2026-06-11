@@ -561,6 +561,11 @@
               <FilePath>..\..\User\app_screen_auth.c</FilePath>
             </File>
             <File>
+              <FileName>app_temp_password.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_temp_password.c</FilePath>
+            </File>
+            <File>
               <FileName>app_screen1_unlock.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_screen1_unlock.c</FilePath>

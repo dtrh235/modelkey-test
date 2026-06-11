@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>首页 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+  <style>.hide-scroll::-webkit-scrollbar{display:none}</style>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  let unreadNotify = jzNotifyUnreadCount();
+  let todayCount = jzTodayUnlockCountFromCache();
+  let userCount = jzUsersFromCache().length;
+  let recentViews = jzUnlockRecordsFromCache().slice(0, 3).map(jzRecordToView);
+
+  function recentBlockHtml() {
+    const colorMap = { 密码: 'bg-amber-50 text-amber-600', NFC: 'bg-amber-50 text-amber-600', 指纹: 'bg-blue-50 text-ycu-blue', 手机: 'bg-ycu-teal-light text-ycu-teal-dark', 临时: 'bg-orange-50 text-orange-600' };
+    if (!recentViews.length) {
+      return '<div class="px-3 py-6 text-center text-slate-400 text-sm">暂无最近记录</div>';
+    }
+    return recentViews.map((r) => {
+      const ic = lockMethodIcon(r.m);
+      const cls = colorMap[r.m] || 'bg-slate-100 text-slate-500';
+      return `
+        <a href="${jzHref('record_detail.html?id=' + encodeURIComponent(r.id), 'home')}" class="flex items-center gap-3 p-3.5 bg-white rounded-2xl mb-2 shadow-card border border-slate-50/80 active:bg-ycu-teal-light/30">
+          <div class="w-10 h-10 rounded-xl ${cls} flex items-center justify-center"><i class="fa-solid ${ic}"></i></div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-ycu-navy whitespace-nowrap overflow-hidden text-ellipsis">${jzRecordTitleLine(r)}</p>
+            <p class="text-[11px] text-slate-400 mt-0.5 whitespace-nowrap overflow-hidden text-ellipsis">${r.t} · ${r.d}</p>
+          </div>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-medium whitespace-nowrap">成功</span>
+          <i class="fa-solid fa-chevron-right text-slate-200 text-xs ml-1"></i>
+        </a>`;
+    }).join('');
+  }
+
+  function refreshHomeUserCount() {
+    userCount = jzUsersFromCache().length;
+    const ucEl = document.getElementById('homeUserCount');
+    if (ucEl) ucEl.textContent = String(userCount);
+  }
+
+  async function loadHomeRecords() {
+    const [tc, raw] = await Promise.all([
+      jzFetchTodayUnlockCount(),
+      jzFetchUnlockRecords(),
+      jzFetchNotifications({ baseline: false }),
+    ]);
+    todayCount = tc;
+    unreadNotify = jzPaintNotifyBadges();
+    userCount = jzUsersFromCache().length;
+    recentViews = raw.slice(0, 3).map(jzRecordToView);
+    const tcEl = document.getElementById('homeTodayCount');
+    const ucEl = document.getElementById('homeUserCount');
+    const rcEl = document.getElementById('homeRecentList');
+    if (tcEl) tcEl.textContent = String(todayCount);
+    if (ucEl) ucEl.textContent = String(userCount);
+    if (rcEl) rcEl.innerHTML = recentBlockHtml();
+  }
+
+  initAndroidPhone(`
+    <div class="flex-1 flex flex-col overflow-hidden min-h-0">
+      <div id="homeScroll" class="flex-1 min-h-0 overflow-y-auto hide-scroll">
+        <div class="bg-gradient-to-b from-ycu-teal-light to-ycu-surface pb-1">
+          <div class="px-5 pt-3 pb-2 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              ${renderAvatarLink('profile.html', 'w-10 h-10', 'ring-2 ring-white/80')}
+              <div>
+                <p class="text-slate-400 text-[11px]">Joyful Zone</p>
+                <h2 class="text-base font-bold text-ycu-navy">${jzHomeGreetingTitle()}</h2>
+              </div>
+            </div>
+            <a href="${jzHref('notifications.html', 'home')}" class="w-10 h-10 rounded-full bg-white shadow-card flex items-center justify-center text-ycu-teal-dark relative">
+              <i class="fa-solid fa-bell"></i>
+              <span id="homeNotifyBellBadge" class="${unreadNotify ? '' : 'hidden'}">${unreadNotify ? `<span class="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 bg-ycu-sun text-white text-[9px] rounded-full flex items-center justify-center font-bold">${unreadNotify}</span>` : ''}</span>
+            </a>
+          </div>
+          <div id="homeDeviceStrip">${renderDeviceStrip()}</div>
+        </div>
+        <div class="px-5 pt-4 pb-2 -mt-1">
+        <div class="flex flex-col items-center mb-5">
+          <a href="${jzHref('unlock.html', 'home')}" class="relative w-[148px] h-[148px] rounded-full bg-white shadow-card-lg flex items-center justify-center ring-4 ring-ycu-teal/25 active:scale-95 transition-all">
+            <div class="w-[120px] h-[120px] rounded-full bg-gradient-to-br from-ycu-teal to-ycu-teal-dark flex flex-col items-center justify-center text-white">
+              <i class="fa-solid fa-lock text-[32px] mb-1"></i>
+              <span class="text-xs font-semibold tracking-wide">已上锁</span>
+            </div>
+            <span class="absolute -bottom-1 px-3 py-0.5 rounded-full bg-white text-[10px] text-ycu-teal-dark font-medium shadow-card border border-ycu-teal/20">点击远程开锁</span>
+          </a>
+        </div>
+
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2.5">快捷功能</h3>
+        <div class="grid grid-cols-3 gap-3 mb-5">
+          ${[
+            [jzHref('unlock.html', 'home'), 'fa-lock-open', '远程开锁', 'from-ycu-teal to-ycu-teal-dark'],
+            ['records.html', 'fa-clock-rotate-left', '开锁记录', 'from-ycu-blue to-sky-400'],
+            [jzHref('users.html', 'home'), 'fa-users', '用户管理', 'from-ycu-gold to-amber-400'],
+          ].map(([h,ic,t,g]) => `
+            <a href="${h}" class="flex flex-col items-center gap-2 p-3 rounded-2xl bg-white shadow-card border border-slate-50 active:scale-95 transition-transform">
+              <div class="w-12 h-12 rounded-xl bg-gradient-to-br ${g} text-white flex items-center justify-center shadow-sm"><i class="fa-solid ${ic}"></i></div>
+              <span class="text-[11px] font-medium text-ycu-navy">${t}</span>
+            </a>`).join('')}
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mb-5">
+          <a href="records.html" class="bg-white rounded-xl p-3 text-center shadow-card border border-slate-50">
+            <p id="homeTodayCount" class="text-xl font-bold text-ycu-teal-dark">${todayCount}</p><p class="text-[10px] text-slate-400">今日开锁</p>
+          </a>
+          <a href="users.html" class="bg-white rounded-xl p-3 text-center shadow-card border border-slate-50">
+            <p id="homeUserCount" class="text-xl font-bold text-ycu-blue">${userCount}</p><p class="text-[10px] text-slate-400">注册用户</p>
+          </a>
+          <a href="${jzHref('notifications.html', 'home')}" class="bg-white rounded-xl p-3 text-center shadow-card border border-slate-50">
+            <p id="homeNotifyStatCount" class="text-xl font-bold text-ycu-sun">${unreadNotify}</p><p class="text-[10px] text-slate-400">未读通知</p>
+          </a>
+        </div>
+
+        <div class="flex justify-between items-center mb-2">
+          <h3 class="text-sm font-semibold text-ycu-navy">最近开锁</h3>
+          <a href="records.html" class="text-xs text-ycu-teal-dark font-medium">查看全部 →</a>
+        </div>
+        <div id="homeRecentList">${recentBlockHtml()}</div>
+        </div>
+      </div>
+      ${renderBottomNav('home')}
+    </div>
+  `, { fullBleed: true });
+
+  jzInitTabScroll('homeScroll', {
+    onRefresh: async () => {
+      const [tc, raw, userList] = await Promise.all([
+        jzFetchTodayUnlockCount(),
+        jzFetchUnlockRecords({ refresh: true }),
+        jzFetchUsers({ refresh: true }),
+        jzFetchNotifications({ baseline: false }),
+      ]);
+      todayCount = tc;
+      unreadNotify = jzPaintNotifyBadges();
+      userCount = userList.length;
+      recentViews = raw.slice(0, 3).map(jzRecordToView);
+      const tcEl = document.getElementById('homeTodayCount');
+      const ucEl = document.getElementById('homeUserCount');
+      const rcEl = document.getElementById('homeRecentList');
+      if (tcEl) tcEl.textContent = String(todayCount);
+      if (ucEl) ucEl.textContent = String(userCount);
+      if (rcEl) rcEl.innerHTML = recentBlockHtml();
+    },
+  });
+
+  function refreshHomeBindStrip() {
+    const wrap = document.getElementById('homeDeviceStrip');
+    if (!wrap) return;
+    wrap.innerHTML = renderDeviceStrip();
+  }
+
+  function onBindLost() {
+    showToast('设备绑定已失效，请重新配对', 'error');
+    refreshHomeBindStrip();
+    todayCount = 0;
+    userCount = 0;
+    recentViews = [];
+    const tcEl = document.getElementById('homeTodayCount');
+    const ucEl = document.getElementById('homeUserCount');
+    const rcEl = document.getElementById('homeRecentList');
+    if (tcEl) tcEl.textContent = '0';
+    if (ucEl) ucEl.textContent = '0';
+    if (rcEl) rcEl.innerHTML = recentBlockHtml();
+  }
+
+  const sync = await jzSyncDeviceBindStatus();
+  if (sync.cleared) {
+    onBindLost();
+  } else {
+    refreshHomeBindStrip();
+  }
+
+  window.addEventListener('jz-users-changed', refreshHomeUserCount);
+  window.addEventListener('jz-notify-changed', () => { unreadNotify = jzPaintNotifyBadges(); });
+
+  jzWatchPageRefresh({
+    onResume: async () => {
+      const s = await jzSyncDeviceBindStatus();
+      refreshHomeBindStrip();
+      if (s.cleared) {
+        onBindLost();
+      }
+    },
+    onBindChange: (d) => {
+      refreshHomeBindStrip();
+      if (!d.bound && d.cleared) {
+        onBindLost();
+      }
+    },
+    adaptivePresence: true,
+    onPoll: async () => {
+      const s = await jzSyncDeviceBindStatus();
+      refreshHomeBindStrip();
+      if (s.cleared) {
+        onBindLost();
+      }
+    },
+  });
+
+  loadHomeRecords();
+});
+</script>
+</body>
+</html>

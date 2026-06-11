@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>通知中心 — Joyful Zone</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <script src="shared.js"></script>
+
+  <script>tailwind.config = jzTailwindConfig();</script>
+
+</head>
+
+<body>
+
+<script>
+
+document.addEventListener('DOMContentLoaded', async () => {
+  const filters = [
+
+    { key: 'all', label: '全部' },
+
+    { key: 'unlock', label: '开锁' },
+
+    { key: 'alert', label: '告警' },
+
+    { key: 'device', label: '用户' },
+
+    { key: 'system', label: '系统' },
+
+  ];
+
+  let activeFilter = 'all';
+
+  let readIds = new Set(jzLoadSettings().notifyReadIds || []);
+
+
+
+  function items() {
+
+    const s = jzLoadSettings();
+    return jzNotifyVisibleItems().map((n) => ({
+
+      ...n,
+
+      unread: jzNotifyIsUnread(n, s) && !readIds.has(n.id),
+
+    }));
+
+  }
+
+
+
+  function filtered() {
+
+    const all = items();
+
+    if (activeFilter === 'all') return all;
+
+    return all.filter((n) => n.cat === activeFilter);
+
+  }
+
+
+
+  function unreadCount() {
+
+    return items().filter((n) => n.unread).length;
+
+  }
+
+
+
+  const pushOff = !jzLoadSettings().notifyPush;
+
+
+
+  initAndroidPhone(`
+
+    ${renderTopAppBar('通知中心', { back: jzResolveBack('home.html'), actionIcon: 'fa-gear', actionHref: jzHref('notify_settings.html', 'notifications') })}
+
+    <div class="px-4 py-2 flex items-center justify-between flex-shrink-0 bg-white border-b border-slate-50">
+
+      <div class="flex gap-2 overflow-x-auto" id="filters"></div>
+
+      <button type="button" id="readAll" class="text-xs text-ycu-teal-dark font-medium whitespace-nowrap ml-2">全部已读</button>
+
+    </div>
+
+    <div class="flex-1 overflow-y-auto bg-white" id="list"></div>
+
+  `, { fullBleed: true });
+
+
+
+  const listEl = document.getElementById('list');
+
+  const filterBar = document.getElementById('filters');
+
+
+
+  function renderList() {
+
+    const data = filtered();
+
+    const unread = unreadCount();
+
+    const readBtn = document.getElementById('readAll');
+
+    if (readBtn) {
+
+      readBtn.classList.toggle('opacity-40', unread === 0);
+
+      readBtn.disabled = unread === 0;
+
+    }
+
+    if (pushOff) {
+
+      listEl.innerHTML = `
+
+        <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+
+          <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300 text-2xl mb-3"><i class="fa-solid fa-bell-slash"></i></div>
+
+          <p class="text-sm text-slate-500">推送已关闭</p>
+
+          <a href="${jzHref('notify_settings.html', 'notifications')}" class="mt-3 text-sm text-ycu-teal-dark font-medium">去开启消息通知</a>
+
+        </div>`;
+
+      return;
+
+    }
+
+    if (data.length === 0) {
+
+      listEl.innerHTML = `
+
+        <div class="flex flex-col items-center justify-center py-16 px-6 text-center">
+
+          <div class="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-300 text-2xl mb-3"><i class="fa-solid fa-bell-slash"></i></div>
+
+          <p class="text-sm text-slate-500">暂无此类通知</p>
+
+        </div>`;
+
+      return;
+
+    }
+
+    listEl.innerHTML = data.map((n, i) => renderNotifyItem(n, i)).join('');
+
+  }
+
+
+
+  filters.forEach((f, i) => {
+
+    const btn = document.createElement('button');
+
+    btn.type = 'button';
+
+    btn.textContent = f.label;
+
+    btn.dataset.key = f.key;
+
+    btn.className = i === 0
+
+      ? 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-ycu-teal text-white'
+
+      : 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-500';
+
+    btn.onclick = () => {
+
+      activeFilter = f.key;
+
+      filterBar.querySelectorAll('.chip').forEach((b) => {
+
+        b.className = 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-slate-100 text-slate-500';
+
+      });
+
+      btn.className = 'chip px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap bg-ycu-teal text-white';
+
+      renderList();
+
+    };
+
+    filterBar.appendChild(btn);
+
+  });
+
+
+
+  document.getElementById('readAll').onclick = () => {
+
+    jzNotifyVisibleItems().forEach((n) => readIds.add(n.id));
+
+    jzSaveSettings({ notifyReadIds: [...readIds] });
+
+    renderList();
+    jzEmitNotifyChanged();
+
+    showToast('已全部标为已读');
+
+  };
+
+
+
+  renderList();
+
+  jzInitTabScroll('list', {
+    onRefresh: () => jzFetchNotifications({ baseline: false }).then(() => { renderList(); }),
+  });
+
+  function reloadNotifications() {
+    return jzFetchNotifications({ baseline: false }).then(() => { renderList(); });
+  }
+
+  reloadNotifications();
+
+  jzWatchPageRefresh({
+    onResume: reloadNotifications,
+    pollMs: 12000,
+    onPoll: reloadNotifications,
+    onBindChange: (d) => {
+      if (!d.bound && d.cleared) {
+        jzSaveSettings({ notifyCache: null });
+        renderList();
+        return;
+      }
+      if (d.bound) reloadNotifications();
+    },
+  });
+});
+
+</script>
+
+</body>
+
+</html>
+

@@ -30,7 +30,13 @@ void cloud_aliyun_at_wifi_join_diag_printf(void);
 #else
 #define cloud_aliyun_at_wifi_join_diag_printf() ((void)0)
 #endif
+/** 仅发出 property/post（SEND OK 即成功，不等待 post_reply） */
+uint8_t cloud_aliyun_at_publish_property_send(const char *json_payload);
+/** 等待 post_reply：1=200，2=超时未拒绝(SEND ok)，0=明确失败 */
+uint8_t cloud_aliyun_at_property_post_await(uint32_t wait_ms);
 uint8_t cloud_aliyun_at_publish_property(const char *json_payload);
+/** 向任意 MQTT Topic 发布 QoS0 JSON。 @return 1=已发出 */
+uint8_t cloud_aliyun_at_mqtt_publish_qos0(const char *topic, const char *json_payload);
 void cloud_aliyun_at_invalidate_unlock_flush(void);
 
 /* Shared UART2 (ESP WiFi) for WiFi settings UI scan/connect */
@@ -98,5 +104,19 @@ void cloud_aliyun_at_request_mqtt_connect(void);
 void cloud_aliyun_at_mqtt_session_disconnect(void);
 uint8_t cloud_aliyun_at_mqtt_connecting(void);
 uint8_t cloud_aliyun_at_time_is_synced(void);
+/** 1=MQTT-NTP 多次失败，本连接周期内不再阻塞 terminal/get 订阅 */
+uint8_t cloud_aliyun_at_ntp_give_up(void);
+/** 下一次 SUBSCRIBE 将使用的 MQTT 包 ID（不递增） */
+uint16_t cloud_aliyun_at_mqtt_peek_pkt_id(void);
+/** MQTT 在线时发送 SUBSCRIBE(qos0)。@return 1=已发出；out_pkt_id 可填 NULL */
+uint8_t cloud_aliyun_at_mqtt_subscribe_qos0(const char *topic, uint16_t *out_pkt_id);
+/** 轮询 UART2 上 MQTT SUBACK / 下行 PUBLISH（订阅等待期调用） */
+void cloud_aliyun_at_pump_mqtt_ctrl(void);
+/** rx 窗口里是否有匹配 pkt_id 的 MQTT SUBACK */
+uint8_t cloud_aliyun_at_mqtt_suback_matches(uint16_t pkt_id);
+/** 调试：一行 MQTT/订阅状态快照（APP_CLOUD_COMMAND_TRACE） */
+void cloud_aliyun_at_cmd_diag_log(const char *tag);
+/** 调试：rx 窗口十六进制预览 */
+void cloud_aliyun_at_cmd_diag_rx_hex(void);
 
 #endif

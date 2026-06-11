@@ -7,6 +7,7 @@
 #include "app_rs485_link.h"
 
 #if APP_RS485_IS_SLAVE
+#include "app_temp_password.h"
 #include "app_state.h"
 #include "app_user_ops.h"
 #include "app_slave_diag.h"
@@ -32,7 +33,10 @@
 #define RS485_CRC_LEN   2u
 
 #define RS485_CMD_SLAVE_UNLOCK_NOTIFY 0x10u
+#define RS485_CMD_SLAVE_LOCKOUT_ALERT 0x11u
 #define RS485_CMD_MIRROR_SYNC_REQ     0x04u
+#define RS485_CMD_TEMP_PWD_SET        0x06u
+#define RS485_CMD_TEMP_PWD_REVOKE     0x07u
 
 static uint8_t s_tx_seq;
 #if APP_RS485_IS_SLAVE
@@ -79,9 +83,21 @@ static uint8_t rs485_slave_take_pending_rsp(uint8_t *rxb, uint16_t cap, uint16_t
 static volatile uint8_t s_unlock_notify_pending;
 static char s_unlock_notify_acc[13];
 static uint8_t s_unlock_notify_mid;
+static volatile uint8_t s_lockout_alert_pending;
+static char s_lockout_alert_acc[13];
 static volatile uint8_t s_fp_commit_pending;
 static uint16_t s_fp_commit_page;
 static uint8_t s_fp_commit_status;
+
+void app_rs485_slave_lockout_alert_async(const char *last_acc)
+{
+    if(last_acc == NULL) {
+        last_acc = "";
+    }
+    strncpy(s_lockout_alert_acc, last_acc, sizeof(s_lockout_alert_acc) - 1u);
+    s_lockout_alert_acc[sizeof(s_lockout_alert_acc) - 1u] = '\0';
+    s_lockout_alert_pending = 1u;
+}
 
 void app_rs485_slave_unlock_notify_async(const char *acc, uint8_t method_id)
 {
@@ -101,8 +117,18 @@ void app_rs485_slave_flush_pending_notify(void)
 
     app_slave_unlock_queue_flush_rs485();
 
-    if(s_unlock_notify_pending == 0u && s_fp_commit_pending == 0u) {
+    if(s_unlock_notify_pending == 0u && s_fp_commit_pending == 0u && s_lockout_alert_pending == 0u) {
         return;
+    }
+
+    if(s_lockout_alert_pending != 0u) {
+        uint8_t pl[13];
+        pl[0] = RS485_UNLOCK_DEVICE_SLAVE;
+        memset(pl + 1u, 0, 12u);
+        strncpy((char *)(pl + 1u), s_lockout_alert_acc, 12u);
+        if(rs485_do_cmd(RS485_CMD_SLAVE_LOCKOUT_ALERT, pl, (uint16_t)sizeof(pl), 400u)) {
+            s_lockout_alert_pending = 0u;
+        }
     }
 
     if(s_unlock_notify_pending != 0u) {
@@ -520,6 +546,29 @@ static uint8_t rs485_slave_serve_master_frame(const uint8_t *rxb, uint16_t n)
             err = okb ? 0u : 1u;
             okb = rs485_send_reply(seq, 0x85u, err);
         }
+    } else if(cmd == RS485_CMD_TEMP_PWD_SET && plen == 16u) {
+        const uint8_t *pl = rxb + RS485_HDR_FIXED;
+        char acc[5];
+        char pwd[7];
+        uint32_t valid_sec;
+
+        memset(acc, 0, sizeof(acc));
+        memset(pwd, 0, sizeof(pwd));
+        memcpy(acc, pl, 4u);
+        memcpy(pwd, pl + 5u, 6u);
+        valid_sec = (uint32_t)pl[12] | ((uint32_t)pl[13] << 8) |
+                    ((uint32_t)pl[14] << 16) | ((uint32_t)pl[15] << 24);
+        okb = app_temp_password_add(acc, pwd, valid_sec) != 0u;
+        err = okb ? 0u : 1u;
+        okb = rs485_send_reply(seq, (uint8_t)(RS485_CMD_TEMP_PWD_SET | 0x80u), err);
+    } else if(cmd == RS485_CMD_TEMP_PWD_REVOKE && plen == 5u) {
+        char acc[5];
+
+        memset(acc, 0, sizeof(acc));
+        memcpy(acc, rxb + RS485_HDR_FIXED, 4u);
+        okb = app_temp_password_revoke(acc) != 0u;
+        err = okb ? 0u : 1u;
+        okb = rs485_send_reply(seq, (uint8_t)(RS485_CMD_TEMP_PWD_REVOKE | 0x80u), err);
     } else {
         okb = rs485_send_reply(seq, (uint8_t)(cmd | 0x80u), 1u);
     }

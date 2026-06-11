@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>用户管理 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  let users = jzUsersFromCache();
+  let searchQ = '';
+
+  initAndroidPhone(`
+    ${renderTopAppBar('用户管理', { back: 'home.html' })}
+    <div class="px-4 py-3 bg-white border-b border-slate-50 flex-shrink-0">
+      ${renderPageDesc('管理门锁账号与密码。下拉可同步门锁。')}
+    </div>
+    <div class="px-4 py-2 flex gap-2 flex-shrink-0 bg-white border-b border-slate-50">
+      <div class="flex-1 flex items-center gap-2 bg-ycu-surface rounded-xl px-3 py-2.5 border border-slate-100">
+        <i class="fa-solid fa-magnifying-glass text-slate-300 text-sm"></i>
+        <input id="userSearch" class="flex-1 bg-transparent text-sm outline-none text-ycu-navy" placeholder="搜索账号">
+      </div>
+      <a href="${jzHref('user_add.html', 'users')}" class="w-11 h-11 rounded-xl bg-gradient-to-br from-ycu-teal to-ycu-teal-dark text-white flex items-center justify-center shadow-card" aria-label="添加用户"><i class="fa-solid fa-user-plus"></i></a>
+    </div>
+    <p id="userCountLine" class="px-4 py-2 text-sm text-slate-500 bg-ycu-surface flex-shrink-0">已添加 ${users.length} 个账号</p>
+    <div class="flex-1 min-h-0 overflow-y-auto" id="userList"></div>
+    <div class="px-4 pb-4 flex-shrink-0">
+      <a href="${jzHref('user_add.html', 'users')}" class="block py-3.5 rounded-2xl bg-gradient-to-r from-ycu-teal to-ycu-teal-dark text-white font-semibold shadow-card text-center">
+        <i class="fa-solid fa-plus mr-1"></i> 添加用户
+      </a>
+    </div>
+  `, { fullBleed: true });
+
+  const listEl = document.getElementById('userList');
+  const countEl = document.getElementById('userCountLine');
+
+  function userRowHtml(u) {
+    return `
+      <a href="${jzHref('user_detail.html?id=' + encodeURIComponent(u.id), 'users')}" class="flex items-center gap-3 p-4 bg-white rounded-2xl shadow-card border border-slate-50 active:bg-ycu-teal-light/40">
+        <div class="w-11 h-11 rounded-full bg-gradient-to-br from-ycu-teal to-ycu-blue text-white flex items-center justify-center font-bold text-xs font-mono shadow-sm">${jzUserAvatarText(u)}</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <p class="font-semibold text-ycu-navy font-mono tracking-wide">${u.acc}</p>
+            ${jzUserIsAdmin(u) ? '<span class="text-[10px] px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-100">管理员</span>' : ''}
+            ${jzUserIsTemp(u) ? '<span class="text-[10px] px-1.5 py-0.5 rounded-md bg-orange-50 text-orange-600 border border-orange-100">临时</span>' : ''}
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">${jzUserRoleLabel(u)}</p>
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <span class="text-[10px] px-2 py-0.5 rounded-md ${u.pwd ? 'bg-ycu-teal-light text-ycu-teal-dark' : 'bg-slate-50 text-slate-300'}"><i class="fa-solid fa-key mr-0.5"></i>密码</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-md ${u.nfc ? 'bg-blue-50 text-ycu-blue' : 'bg-slate-50 text-slate-300'}"><i class="fa-solid fa-nfc-symbol mr-0.5"></i>NFC</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-md ${u.fp ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-300'}"><i class="fa-solid fa-fingerprint mr-0.5"></i>指纹</span>
+          </div>
+        </div>
+        <i class="fa-solid fa-chevron-right text-slate-300 text-sm"></i>
+      </a>`;
+  }
+
+  function renderList() {
+    const sorted = jzSortUsersByAccount(users);
+    const q = searchQ.trim();
+    const filtered = q
+      ? sorted.filter((u) => String(u.acc).includes(q))
+      : sorted;
+    if (countEl) {
+      countEl.textContent = `已添加 ${sorted.length} 个账号`;
+    }
+    if (!filtered.length) {
+      listEl.innerHTML = `<div class="px-6 py-16 text-center text-slate-400 text-sm">${q ? '未找到匹配账号' : '暂无用户，点击添加'}</div>`;
+      return;
+    }
+    listEl.innerHTML = `<div class="px-4 pb-4 space-y-2">${filtered.map(userRowHtml).join('')}</div>`;
+  }
+
+  function reloadFromCache() {
+    users = jzUsersFromCache();
+    renderList();
+  }
+
+  document.getElementById('userSearch').addEventListener('input', (e) => {
+    searchQ = e.target.value;
+    renderList();
+  });
+
+  renderList();
+
+  if (users.length === 0) {
+    jzFetchUsers({ network: true }).then((list) => {
+      users = list;
+      renderList();
+    });
+  }
+
+  jzInitTabScroll('userList', {
+    onRefresh: async () => {
+      users = await jzFetchUsers({ refresh: true });
+      renderList();
+    },
+  });
+
+  window.addEventListener('jz-users-changed', reloadFromCache);
+
+  jzWatchPageRefresh({
+    onResume: async () => {
+      users = await jzFetchUsers({ network: true });
+      renderList();
+    },
+    onBindChange: async (d) => {
+      if (!d.bound && d.cleared) {
+        users = [];
+        renderList();
+        showToast('设备已断开，用户列表已清空', 'info');
+        return;
+      }
+      if (d.usersChanged) {
+        users = await jzFetchUsers({ network: true });
+        renderList();
+      }
+    },
+    onPoll: async () => {
+      const prev = jzUsersListSignature(users);
+      const list = await jzFetchUsers({ network: true });
+      if (jzUsersListSignature(list) !== prev) {
+        users = list;
+        renderList();
+      }
+    },
+    pollMs: 5000,
+  });
+});
+</script>
+</body>
+</html>

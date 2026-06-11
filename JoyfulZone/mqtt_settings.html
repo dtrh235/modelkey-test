@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>云服务 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+initSettingsPage('云服务', 'device_detail.html', `
+  <div class="bg-gradient-to-r from-ycu-teal-light to-white rounded-2xl p-4 shadow-card border border-ycu-teal/10 flex items-center gap-3">
+    <div class="w-12 h-12 rounded-xl bg-white flex items-center justify-center text-ycu-teal-dark shadow-sm"><i class="fa-solid fa-cloud text-xl"></i></div>
+    <div>
+      <p class="font-semibold text-ycu-navy">云端已连接</p>
+      <p class="text-sm text-emerald-600">远程开锁和消息推送可用</p>
+    </div>
+  </div>
+  ${renderSettingsGroup([
+    ['#','fa-lock-open','远程开锁','手机 App 可远程开门',null],
+    ['#','fa-bell','消息推送','开锁提醒与安全告警',null],
+    ['#','fa-clock-rotate-left','记录同步','开锁记录自动上传',null],
+  ])}
+  ${renderHint('请保持门锁 WiFi 连接稳定。')}
+`);
+</script>
+</body>
+</html>

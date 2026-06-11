@@ -421,6 +421,21 @@
               <FilePath>..\..\User\app_cloud_session.c</FilePath>
             </File>
             <File>
+              <FileName>app_cloud_command.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_cloud_command.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_cloud_bind_cmd.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_cloud_bind_cmd.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_temp_password.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_temp_password.c</FilePath>
+            </File>
+            <File>
               <FileName>app_wall_clock.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_wall_clock.c</FilePath>
@@ -589,6 +604,16 @@
               <FileName>app_screen3_menu.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_screen3_menu.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_pair_bind.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_pair_bind.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_screen_pair_flow.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_screen_pair_flow.c</FilePath>
             </File>
             <File>
               <FileName>app_screen4_table.c</FileName>
@@ -1806,9 +1831,19 @@
               <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_wifi_21.c</FilePath>
             </File>
             <File>
+              <FileName>lv_font_cn_pair_21.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_pair_21.c</FilePath>
+            </File>
+            <File>
               <FileName>lv_font_cn_wifi_25.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_wifi_25.c</FilePath>
+            </File>
+            <File>
+              <FileName>lv_font_cn_pair_25.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_pair_25.c</FilePath>
             </File>
             <File>
               <FileName>lv_font_cn_home_20.c</FileName>

@@ -33,6 +33,9 @@ static uint8_t unlock_method_to_id(const char *method)
     if(strcmp(method, "fingerprint") == 0) {
         return 3u;
     }
+    if(strcmp(method, "temporary-password") == 0 || strcmp(method, "temporary") == 0) {
+        return 5u;
+    }
     return 1u;
 }
 #endif

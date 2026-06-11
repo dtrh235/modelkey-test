@@ -112,6 +112,7 @@ static void screen_wifi_scan_dots_anim_tick(void);
 static void screen_wifi_show_scanning(void);
 static void screen_wifi_show_connecting(void);
 static void screen_wifi_show_connect_result(uint8_t ok);
+static void screen_wifi_update_connected_bar(void);
 
 static ui_nav_ctx_t build_nav_ctx(void)
 {
@@ -130,8 +131,34 @@ uint8_t screen_wifi_popup_is_active(void)
     return (s_popup != NULL && lv_obj_is_valid(s_popup)) ? 1u : 0u;
 }
 
+static void screen_wifi_popup_restore_background(void)
+{
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_obj_clear_flag(guider_ui.screen_11_label_scan, LV_OBJ_FLAG_HIDDEN);
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
+        lv_obj_clear_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
+    }
+    screen_wifi_update_connected_bar();
+}
+
+static void screen_wifi_popup_hide_background(void)
+{
+    if(lv_obj_is_valid(guider_ui.screen_11_row_connected)) {
+        lv_obj_add_flag(guider_ui.screen_11_row_connected, LV_OBJ_FLAG_HIDDEN);
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan)) {
+        lv_obj_add_flag(guider_ui.screen_11_label_scan, LV_OBJ_FLAG_HIDDEN);
+    }
+    if(lv_obj_is_valid(guider_ui.screen_11_label_scan_dots)) {
+        lv_obj_add_flag(guider_ui.screen_11_label_scan_dots, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void screen_wifi_popup_close(void)
 {
+    uint8_t had_popup = screen_wifi_popup_is_active();
+
     if(s_popup != NULL && lv_obj_is_valid(s_popup)) {
         lv_obj_del(s_popup);
     }
@@ -140,9 +167,11 @@ static void screen_wifi_popup_close(void)
     s_popup_btn_conn = NULL;
     s_popup_btn_cancel = NULL;
     s_wifi_cursor = NULL;
+    if(had_popup != 0u) {
+        screen_wifi_popup_restore_background();
+    }
 }
 
-static void screen_wifi_popup_close(void);
 static int8_t screen_wifi_find_row_by_ssid(const char *ssid);
 static void screen_wifi_set_selected(uint8_t idx);
 static void screen_wifi_refresh_btn_ensure(void);
@@ -322,11 +351,14 @@ static void screen_wifi_popup_open(const char *ssid)
     lv_obj_set_pos(s_popup_ta, 10, 40);
     lv_obj_set_size(s_popup_ta, 200, 36);
     lv_obj_set_style_bg_color(s_popup_ta, lv_color_hex(0xffffff), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(s_popup_ta, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_border_width(s_popup_ta, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(s_popup_ta, &lv_font_montserratMedium_16, LV_PART_MAIN | LV_STATE_DEFAULT);
     ui_textarea_apply_input_style(s_popup_ta, 1u);
     ui_cursor_attach_bar(&s_wifi_cursor, s_popup_ta);
     ui_cursor_activate(s_wifi_cursor, &s_wifi_cursor_visible, &s_wifi_cursor_last_ms);
+
+    screen_wifi_popup_hide_background();
 
     s_popup_btn_conn = screen_wifi_popup_make_btn(s_popup,
                                                   "\xe8\xbf\x9e\xe6\x8e\xa5", 10, 112);

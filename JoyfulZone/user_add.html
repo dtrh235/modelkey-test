@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>添加用户 — Joyful Zone</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="shared.js"></script>
+  <script>tailwind.config = jzTailwindConfig();</script>
+</head>
+<body>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  initSettingsPage('添加用户', 'users.html', `
+    ${renderPageDesc('填写门锁账号与密码，保存后将同步到门锁。')}
+    ${renderSectionLabel('账号与密码')}
+    <div class="bg-white rounded-2xl p-4 shadow-card space-y-4 border border-slate-50">
+      <div>
+        <label class="text-sm font-medium text-slate-600">开门账号</label>
+        <input id="accInput" inputmode="numeric" pattern="\\d*" maxlength="12"
+          class="w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono outline-none focus:border-ycu-teal tracking-wider"
+          placeholder="1-12 位数字，如 1003">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-600">开门密码</label>
+        <input id="pwdInput" type="password" inputmode="numeric" pattern="\\d*" maxlength="10"
+          class="w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-mono outline-none focus:border-ycu-teal tracking-wider"
+          placeholder="4-10 位数字">
+      </div>
+      <div>
+        <label class="text-sm font-medium text-slate-600">角色</label>
+        <select id="roleSelect" class="w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 text-sm bg-white text-ycu-navy">
+          <option value="user">普通用户</option>
+          <option value="admin">管理员</option>
+        </select>
+      </div>
+    </div>
+    ${renderHint('账号与密码规则与门锁键盘一致。NFC、指纹请在门锁屏幕上录入。')}
+    <button type="button" id="saveUser" class="w-full py-3.5 rounded-2xl bg-gradient-to-r from-ycu-teal to-ycu-teal-dark text-white font-semibold shadow-card">完成添加</button>
+  `, { backAnchor: 'fixed' });
+
+  document.getElementById('saveUser').onclick = async () => {
+    const acc = document.getElementById('accInput').value.trim();
+    const pwd = document.getElementById('pwdInput').value.trim();
+    const isAdmin = document.getElementById('roleSelect').value === 'admin';
+    if (!jzIsNumericCred(acc, JZ_CRED.ACC_MIN_LEN, JZ_CRED.ACC_MAX_LEN)) {
+      showToast('账号须为 1-12 位数字', 'error');
+      return;
+    }
+    if (!jzIsNumericCred(pwd, JZ_CRED.PWD_MIN_LEN, JZ_CRED.PWD_MAX_LEN)) {
+      showToast('密码须为 4-10 位数字', 'error');
+      return;
+    }
+    if (jzTakenLockAccounts().has(acc)) {
+      showToast('该账号已被占用，请换一个', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('saveUser');
+    btn.disabled = true;
+    btn.textContent = '正在同步门锁…';
+    const res = await jzCreateUser({ account: acc, password: pwd, isAdmin });
+    btn.disabled = false;
+    btn.textContent = '完成添加';
+    if (!res.ok) return;
+    showToast('用户已添加');
+    setTimeout(() => { location.replace('users.html'); }, 600);
+  };
+});
+</script>
+</body>
+</html>
