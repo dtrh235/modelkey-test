@@ -93,7 +93,7 @@ static void lcd_spi_periph_init(void)
     g_lcd_spi.Init.CLKPolarity = SPI_POLARITY_LOW;
     g_lcd_spi.Init.CLKPhase = SPI_PHASE_1EDGE;
     g_lcd_spi.Init.NSS = SPI_NSS_SOFT;
-    g_lcd_spi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+    g_lcd_spi.Init.BaudRatePrescaler = LCD_SPI_BAUDRATE_PRESCALER;
     g_lcd_spi.Init.FirstBit = SPI_FIRSTBIT_MSB;
     g_lcd_spi.Init.TIMode = SPI_TIMODE_DISABLE;
     g_lcd_spi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;

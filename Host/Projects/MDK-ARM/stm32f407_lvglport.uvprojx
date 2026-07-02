@@ -336,7 +336,7 @@
               <MiscControls>--locale=english</MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\Drivers;..\..\Drivers\CMSIS\Include;..\..\Drivers\CMSIS\Device\ST\STM32F4xx\Include;..\..\Drivers\STM32F4xx_HAL_Driver\Inc;..\..\Middlewares;..\..\Middlewares\FreeRTOS-Kernel\include;..\..\Middlewares\FreeRTOS-Kernel\portable\RVDS\ARM_CM4F;..\..\User;..\..\Drivers\BSP;..\..\Drivers\BSP\LCD;..\..\Drivers\BSP\W25Q16;..\..\Drivers\SYSTEM\sys;..\..\Middlewares\LVGL\LVGL_SRC;..\..\Middlewares\LVGL\LVGL_SRC\lvgl;..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src;..\..\Middlewares\LVGL\LVGL_SRC\lvgl\examples\porting;..\..\guider\custom;..\..\guider\generated;..\..\guider\generated\guider_customer_fonts;..\..\guider\generated\guider_fonts;..\..\guider\generated\images;..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\widgets;..\..\Drivers\BSP\mfrc522</IncludePath>
+              <IncludePath>..\..\Drivers;..\..\Drivers\CMSIS\Include;..\..\Drivers\CMSIS\Device\ST\STM32F4xx\Include;..\..\Drivers\STM32F4xx_HAL_Driver\Inc;..\..\Middlewares;..\..\Middlewares\FreeRTOS-Kernel\include;..\..\Middlewares\FreeRTOS-Kernel\portable\RVDS\ARM_CM4F;..\..\User;..\..\User\ui_v3;..\..\Drivers\BSP;..\..\Drivers\BSP\LCD;..\..\Drivers\BSP\W25Q16;..\..\Drivers\SYSTEM\sys;..\..\Middlewares\LVGL\LVGL_SRC;..\..\Middlewares\LVGL\LVGL_SRC\lvgl;..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src;..\..\Middlewares\LVGL\LVGL_SRC\lvgl\examples\porting;..\..\guider\custom;..\..\guider\generated;..\..\guider\generated\guider_customer_fonts;..\..\guider\generated\guider_fonts;..\..\guider\generated\images;..\..\Middlewares\LVGL\LVGL_SRC\lvgl\src\widgets;..\..\Drivers\BSP\mfrc522</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -456,39 +456,9 @@
               <FilePath>..\..\User\cloud_legacy_adapter.c</FilePath>
             </File>
             <File>
-              <FileName>ui.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\ui.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_auth_input.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\ui_auth_input.c</FilePath>
-            </File>
-            <File>
               <FileName>ui_common_utils.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\ui_common_utils.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_flow_panels.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\ui_flow_panels.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_menu_popup_utils.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\ui_menu_popup_utils.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_nav_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\ui_nav_flow.c</FilePath>
-            </File>
-            <File>
-              <FileName>ui_screen8_utils.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\ui_screen8_utils.c</FilePath>
             </File>
             <File>
               <FileName>user_auth_portable.c</FileName>
@@ -511,19 +481,9 @@
               <FilePath>..\..\User\app_key_ui.c</FilePath>
             </File>
             <File>
-              <FileName>app_touch_ui.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_touch_ui.c</FilePath>
-            </File>
-            <File>
               <FileName>app_state.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_state.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_home_nav_btns.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_home_nav_btns.c</FilePath>
             </File>
             <File>
               <FileName>app_board_gpio.c</FileName>
@@ -576,59 +536,14 @@
               <FilePath>..\..\User\app_unlock_event.c</FilePath>
             </File>
             <File>
-              <FileName>app_nav_entries.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_nav_entries.c</FilePath>
-            </File>
-            <File>
               <FileName>app_nfc_hw.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_nfc_hw.c</FilePath>
             </File>
             <File>
-              <FileName>app_screen_auth.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen_auth.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen1_unlock.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen1_unlock.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen2_login.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen2_login.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen3_menu.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen3_menu.c</FilePath>
-            </File>
-            <File>
               <FileName>app_pair_bind.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_pair_bind.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen_pair_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen_pair_flow.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen4_table.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen4_table.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen5_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen5_flow.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen_wifi_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen_wifi_flow.c</FilePath>
             </File>
             <File>
               <FileName>app_wifi_diag.c</FileName>
@@ -666,54 +581,69 @@
               <FilePath>..\..\User\app_screen6_commit.c</FilePath>
             </File>
             <File>
-              <FileName>app_screen6_dialog_base.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen6_dialog_base.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen6_dialog_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen6_dialog_flow.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen6_info.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen6_info.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen7_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen7_flow.c</FilePath>
-            </File>
-            <File>
               <FileName>app_screen8_enroll.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\app_screen8_enroll.c</FilePath>
             </File>
             <File>
-              <FileName>app_screen8_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen8_flow.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen8_focus.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen8_focus.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen8_popup.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen8_popup.c</FilePath>
-            </File>
-            <File>
-              <FileName>app_screen9_10_flow.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\User\app_screen9_10_flow.c</FilePath>
-            </File>
-            <File>
               <FileName>cloud_aliyun_at.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\cloud_aliyun_at.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_theme.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_theme.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_anim.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_anim.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_widgets.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_widgets.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_gesture.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_gesture.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_screens.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_screens.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_keys.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_keys.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_ui_v3_users.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ui_v3\app_ui_v3_users.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_host_hw_selftest.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_host_hw_selftest.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_legacy_ui_stubs.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_legacy_ui_stubs.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_user_add_flow.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\app_user_add_flow.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -1691,169 +1621,24 @@
           <GroupName>guider</GroupName>
           <Files>
             <File>
-              <FileName>custom.c</FileName>
+              <FileName>lv_font_ui_v3_13.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\guider\custom\custom.c</FilePath>
+              <FilePath>..\..\guider\generated\guider_fonts\lv_font_ui_v3_13.c</FilePath>
             </File>
             <File>
-              <FileName>events_init.c</FileName>
+              <FileName>lv_font_ui_v3_16.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\events_init.c</FilePath>
+              <FilePath>..\..\guider\generated\guider_fonts\lv_font_ui_v3_16.c</FilePath>
             </File>
             <File>
-              <FileName>gui_guider.c</FileName>
+              <FileName>lv_font_ui_v3_20.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\gui_guider.c</FilePath>
+              <FilePath>..\..\guider\generated\guider_fonts\lv_font_ui_v3_20.c</FilePath>
             </File>
             <File>
-              <FileName>setup_scr_screen.c</FileName>
+              <FileName>lv_font_ui_v3_num_36.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen.c</FilePath>
-            </File>
-            <File>
-              <FileName>widgets_init.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\widgets_init.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserratMedium_19.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_19.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserratMedium_51.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_51.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_20.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_20.c</FilePath>
-            </File>
-            <File>
-              <FileName>_2_alpha_82x77.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\images\_2_alpha_82x77.c</FilePath>
-            </File>
-            <File>
-              <FileName>_3_alpha_240x320.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\images\_3_alpha_240x320.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_1.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_1.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_2.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_2.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_3.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_3.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_4.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_4.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_5.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_5.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_6.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_6.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_7.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_7.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_8.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_8.c</FilePath>
-            </File>
-            <File>
-              <FileName>setup_scr_screen_9.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\setup_scr_screen_9.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserratMedium_12.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_12.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserratMedium_16.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_16.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_montserratMedium_18.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_montserratMedium_18.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_16.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_16.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_18.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_18.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_19.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_19.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_21.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_21.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_SourceHanSerifSC_Regular_25.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_SourceHanSerifSC_Regular_25.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_cn_wifi_21.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_wifi_21.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_cn_pair_21.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_pair_21.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_cn_wifi_25.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_wifi_25.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_cn_pair_25.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_pair_25.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_cn_home_20.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_home_20.c</FilePath>
-            </File>
-            <File>
-              <FileName>lv_font_cn_wifi_16.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\guider\generated\guider_fonts\lv_font_cn_wifi_16.c</FilePath>
+              <FilePath>..\..\guider\generated\guider_fonts\lv_font_ui_v3_num_36.c</FilePath>
             </File>
           </Files>
         </Group>

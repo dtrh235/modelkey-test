@@ -1,6 +1,8 @@
 #include "app_state.h"
 
+#if (APP_LEGACY_UI_ENABLE != 0)
 lv_ui guider_ui;
+#endif
 
 volatile app_scr_t g_app_scr = APP_SCR_HOME;
 volatile uint8_t g_wifi_exclusive = 0u;
@@ -96,6 +98,7 @@ uint8_t g_screen9_msgbox_state = 0u;
 uint32_t g_nfc_enroll_start_time = 0;
 uint8_t g_nfc_enroll_state = 0;
 uint8_t g_nfc_enroll_result = 0;
+uint8_t g_nfc_enroll_dup = 0u;
 volatile uint8_t g_nfc_last_detect_result = 0u;
 volatile uint8_t g_nfc_last_uid[4] = {0u, 0u, 0u, 0u};
 uint32_t g_home_fp_last_poll_ms = 0u;
@@ -108,3 +111,5 @@ uint16_t g_fp_pending_page_id = 0xFFFFu;
 uint8_t g_fp_pending_page2_valid = 0u;
 uint16_t g_fp_pending_page_id_2 = 0xFFFFu;
 lv_timer_t *g_screen8_result_timer = NULL;
+char g_enroll_target_acc[13] = {0};
+uint8_t g_enroll_ui_v3_mode = 0u;

@@ -22,5 +22,7 @@ void app_cloud_command_diag_status(char *buf, size_t buf_sz);
 
 /** 处理 +IPD 内 MQTT PUBLISH（非 NTP）。@return 1=已消费 */
 uint8_t app_cloud_command_on_mqtt_publish(const uint8_t *buf, uint16_t len);
+/** WF24 +MQTTSUBRECV 明文 JSON 下行 */
+uint8_t app_cloud_command_on_mqtt_plain(const uint8_t *buf, uint16_t len);
 
 #endif

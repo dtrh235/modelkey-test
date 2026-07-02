@@ -21,7 +21,8 @@
  *   0x05 FP_TEMPLATE  payload = rs485_fp_tpl_chunk_t
  * 从机→主机:
  *   0x04 MIRROR_SYNC_REQ payload 空 — 请求主机下发全量用户（账号/密码/NFC/指纹）
- *   0x10 UNLOCK_NOTIFY payload 15 字节: method_id + device_id(1=主,2=从) + acc[12] 填充末字节
+ *   0x06 TEMP_PWD_SET / 0x07 TEMP_PWD_REVOKE — 主机下发临时密码
+ *   0x10 UNLOCK_NOTIFY payload 15 字节: method_id(1/2/3/5，无4) + device_id(2) + acc[12]
  * 应答 cmd = 请求 | 0x80, len=0 表示成功；len=1 payload[0]=错误码 表示失败
  */
 

@@ -12,30 +12,30 @@
 #define LCD_SPI_CLK_ENABLE()            do { __HAL_RCC_SPI1_CLK_ENABLE(); } while (0)
 
 #define LCD_SPI_SCK_GPIO_PORT           GPIOA
-#define LCD_SPI_SCK_GPIO_PIN            GPIO_PIN_5
+#define LCD_SPI_SCK_GPIO_PIN            GPIO_PIN_5   /* 网表 LCD_SCLK FPC5.7 U27.30 SPI1_SCK */
 #define LCD_SPI_SCK_GPIO_AF             GPIO_AF5_SPI1
 #define LCD_SPI_SCK_GPIO_CLK_ENABLE()   do { __HAL_RCC_GPIOA_CLK_ENABLE(); } while (0)
 
 #define LCD_SPI_MISO_GPIO_PORT          GPIOA
-#define LCD_SPI_MISO_GPIO_PIN           GPIO_PIN_6
+#define LCD_SPI_MISO_GPIO_PIN           GPIO_PIN_6   /* 网表 LCD_SDO FPC5.9 U27.31 */
 #define LCD_SPI_MISO_GPIO_AF            GPIO_AF5_SPI1
 #define LCD_SPI_MISO_GPIO_CLK_ENABLE()  do { __HAL_RCC_GPIOA_CLK_ENABLE(); } while (0)
 
 #define LCD_SPI_MOSI_GPIO_PORT          GPIOA
-#define LCD_SPI_MOSI_GPIO_PIN           GPIO_PIN_7
+#define LCD_SPI_MOSI_GPIO_PIN           GPIO_PIN_7   /* 网表 LCD_SDA FPC5.6 U27.32 SPI1_MOSI */
 #define LCD_SPI_MOSI_GPIO_AF            GPIO_AF5_SPI1
 #define LCD_SPI_MOSI_GPIO_CLK_ENABLE()  do { __HAL_RCC_GPIOA_CLK_ENABLE(); } while (0)
 
 #define LCD_RST_GPIO_PORT               GPIOE
-#define LCD_RST_GPIO_PIN                GPIO_PIN_4
+#define LCD_RST_GPIO_PIN                GPIO_PIN_4   /* 网表 LCD_RESET FPC5.4 U27.3 */
 #define LCD_RST_GPIO_CLK_ENABLE()       do { __HAL_RCC_GPIOE_CLK_ENABLE(); } while (0)
 
 #define LCD_DC_GPIO_PORT                GPIOE
-#define LCD_DC_GPIO_PIN                 GPIO_PIN_6
+#define LCD_DC_GPIO_PIN                 GPIO_PIN_6   /* 网表 LCD_DC FPC5.5 U27.5 */
 #define LCD_DC_GPIO_CLK_ENABLE()        do { __HAL_RCC_GPIOE_CLK_ENABLE(); } while (0)
 
 #define LCD_CS_GPIO_PORT                GPIOE
-#define LCD_CS_GPIO_PIN                 GPIO_PIN_7
+#define LCD_CS_GPIO_PIN                 GPIO_PIN_7   /* 网表 LCD_CS FPC5.3 U27.38 */
 #define LCD_CS_GPIO_CLK_ENABLE()        do { __HAL_RCC_GPIOE_CLK_ENABLE(); } while (0)
 
 /******************************************************************************************/
@@ -129,6 +129,9 @@ void lcd_wr_regno(volatile uint16_t regno);          /* LCD??????????/??? */
 void lcd_write_reg(uint16_t regno, uint16_t data);   /* LCD?????????? */
 
 void lcd_init(void);                        /* ?????LCD */
+void lcd_spi_cs_hold_begin(void);
+void lcd_spi_cs_hold_end(void);
+void lcd_panel_hw_selftest(void);           /* full-screen RGB hold (APP_LCD_HW_TEST) */
 void lcd_display_on(void);                  /* ????? */ 
 void lcd_display_off(void);                 /* ????? */
 void lcd_scan_dir(uint8_t dir);             /* ???????????? */ 

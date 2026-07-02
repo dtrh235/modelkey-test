@@ -40,7 +40,8 @@ static uint8_t fp_match_host_busy(void)
     if(app_rs485_master_cmd_in_progress() != 0u) {
         return 1u;
     }
-    if(g_screen8_fp_enroll_state == 1u || g_app_scr == APP_SCR_10) {
+    if(g_screen8_fp_enroll_state == 1u || g_app_scr == APP_SCR_6 ||
+       g_app_scr == APP_SCR_8 || g_app_scr == APP_SCR_10) {
         return 1u;
     }
     return 0u;

@@ -10,6 +10,7 @@
 #include "app_user_ops.h"
 #include "app_screen8_popup.h"
 #include "app_screen8_focus.h"
+#include "app_user_add_flow.h"
 
 LV_FONT_DECLARE(lv_font_montserratMedium_16);
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_20);
@@ -110,62 +111,30 @@ bool screen8_has_valid_acc_pwd_input(void)
 {
     const char *acc;
     const char *pwd;
-    size_t la;
-    size_t lp;
-    if(!lv_obj_is_valid(guider_ui.screen_8_ta_1) || !lv_obj_is_valid(guider_ui.screen_8_ta_2)) return false;
+
+    if(!lv_obj_is_valid(guider_ui.screen_8_ta_1) || !lv_obj_is_valid(guider_ui.screen_8_ta_2)) {
+        return false;
+    }
     acc = lv_textarea_get_text(guider_ui.screen_8_ta_1);
     pwd = lv_textarea_get_text(guider_ui.screen_8_ta_2);
-    la = strlen(acc);
-    lp = strlen(pwd);
-    return (la >= 1u && la <= 12u && lp >= 4u && lp <= 10u) ? true : false;
+    return user_add_validate_acc_pwd(acc, pwd);
 }
 
 void screen8_attempt_commit(void)
 {
     const char *acc;
     const char *pwd;
-    size_t la;
-    size_t lp;
-    bool ok = true;
+    bool ok;
     bool is_admin;
-    if(!lv_obj_is_valid(guider_ui.screen_8_ta_1) || !lv_obj_is_valid(guider_ui.screen_8_ta_2)) return;
+
+    if(!lv_obj_is_valid(guider_ui.screen_8_ta_1) || !lv_obj_is_valid(guider_ui.screen_8_ta_2)) {
+        return;
+    }
 
     acc = lv_textarea_get_text(guider_ui.screen_8_ta_1);
     pwd = lv_textarea_get_text(guider_ui.screen_8_ta_2);
-    la = strlen(acc);
-    lp = strlen(pwd);
-
-    if(la < 1u || la > 12u || lp < 4u || lp > 10u) ok = false;
-
-    if(ok) {
-        is_admin = lv_obj_has_state(guider_ui.screen_8_cb_1, LV_STATE_CHECKED);
-        if(!users_try_register(acc, pwd, is_admin)) {
-            ok = false;
-        } else {
-            if(g_nfc_pending_uid_valid && !users_bind_nfc_by_acc(acc, g_nfc_pending_uid)) {
-                (void)users_try_delete_by_acc(acc);
-                ok = false;
-            }
-            if(ok && g_fp_pending_page_valid) {
-                if(!users_bind_fp_by_acc(acc, g_fp_pending_page_id)) {
-                    (void)users_try_delete_by_acc(acc);
-                    ok = false;
-                }
-            }
-            /* 第二页绑定失败不撤销用户（单页即可开锁）。 */
-            if(ok && g_fp_pending_page2_valid) {
-                (void)users_bind_fp_by_acc(acc, g_fp_pending_page_id_2);
-            }
-        }
-    }
-    if(ok) {
-        g_nfc_pending_uid_valid = 0u;
-        memset(g_nfc_pending_uid, 0, sizeof(g_nfc_pending_uid));
-        g_fp_pending_page_valid = 0u;
-        g_fp_pending_page_id = 0xFFFFu;
-        g_fp_pending_page2_valid = 0u;
-        g_fp_pending_page_id_2 = 0xFFFFu;
-    }
+    is_admin = lv_obj_has_state(guider_ui.screen_8_cb_1, LV_STATE_CHECKED);
+    ok = user_add_commit(acc, pwd, is_admin);
     screen8_show_result_popup(ok);
 }
 

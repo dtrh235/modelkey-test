@@ -10,6 +10,19 @@ void app_wifi_diag_init(void)
 {
 }
 
+void app_wifi_trace_stage(const char *stage)
+{
+#if (APP_WIFI_UART_DEBUG != 0) || (APP_WIFI_CWJAP_TRACE != 0)
+    if(stage != NULL) {
+        usart_debug_tx_str("[WiFi][");
+        usart_debug_tx_str(stage);
+        usart_debug_tx_str("]\r\n");
+    }
+#else
+    (void)stage;
+#endif
+}
+
 void app_wifi_diag_log(const char *fmt, ...)
 {
 #if (APP_WIFI_UART_DEBUG == 0)

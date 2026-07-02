@@ -134,6 +134,11 @@ static void screen8_enroll_popup_ok_cb(lv_event_t *e)
 
 void screen8_show_enroll_popup(const char *message)
 {
+#if (APP_UI_V3_ENABLE == 1)
+    if(g_enroll_ui_v3_mode != 0u) {
+        return;
+    }
+#endif
     bool is_progress = false;
 
     if(g_screen8_popup) {

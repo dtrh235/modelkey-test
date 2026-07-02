@@ -25,19 +25,25 @@
 #include "../Drivers/BSP/W25Q16/bsp_w25q16.h"
 #include "app_unlock_uart4.h"
 #include "app_unlock_event.h"
+#if (APP_LEGACY_UI_ENABLE != 0)
 #include "app_screen_auth.h"
+#endif
 #include "app_home_unlock.h"
 #include "app_home_full_hint.h"
 #include "app_wifi_scan.h"
 #include "app_wifi_diag.h"
-#include "app_screen_wifi_flow.h"
 #include "cloud_legacy_adapter.h"
 #include "cloud_aliyun_at.h"
 #include "app_link_guard.h"
 #include "cloud_ota_service.h"
 #include "app_state.h"
 #include "app_ccm_ram.h"
+#include "app_host_hw_selftest.h"
 #include "app_wall_clock.h"
+#include "app_config.h"
+#if (APP_UI_V3_ENABLE == 1)
+#include "app_ui_v3.h"
+#endif
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
 #include "app_fp_mirror_tx.h"
 #endif
@@ -62,10 +68,10 @@
 
 #define APP_TASK_STACK_STORAGE 1536u
 /* CloudTask：WiFi 独占时栈需容纳 CWLAP 调用链 */
-#define APP_TASK_STACK_CLOUD   4096u
+#define APP_TASK_STACK_CLOUD   5120u
 #define APP_TASK_STACK_FP      768u
 #define APP_TASK_STACK_NFC     768u
-#define APP_TASK_STACK_GUI     1536u
+#define APP_TASK_STACK_GUI     3072u
 #define APP_TASK_STACK_HOME_AUTH 768u
 #define APP_TASK_PRIO_HOME_AUTH  3u
 
@@ -84,18 +90,58 @@ static uint8_t app_enroll_flow_active(void)
             g_app_scr == APP_SCR_10) ? 1u : 0u;
 }
 
+static void app_rtos_log_stack_hwm(const char *task_label)
+{
+#if (APP_RTOS_STACK_DIAG != 0)
+    char buf[56];
+    UBaseType_t hwm;
+
+    hwm = uxTaskGetStackHighWaterMark(NULL);
+    (void)snprintf(buf, sizeof(buf), "[RTOS] stack HWM task=%s free=%u words\r\n",
+                   (task_label != NULL) ? task_label : "?",
+                   (unsigned)hwm);
+    usart_debug_tx_str(buf);
+#else
+    (void)task_label;
+#endif
+}
+
 static void app_gui_task(void *argument)
 {
     TickType_t last_wake = xTaskGetTickCount();
+    static uint8_t s_hw_deferred_done;
+    static uint8_t s_first_gui_frame;
 
     (void)argument;
+#if (APP_RTOS_STACK_DIAG != 0)
+    app_rtos_log_stack_hwm("Gui");
+#endif
     for(;;) {
         app_home_unlock_housekeeping();
+        board_relay_poll();
 
+#if (APP_UI_V3_ENABLE == 1)
+        app_ui_v3_tick();
+        lv_timer_handler();
+        app_ui_v3_poll();
+        app_wall_clock_gui_poll();
+        app_key_ui_handle();
+        app_unlock_event_gui_pump();
+        app_home_full_hint_update();
+#if (APP_HOST_HW_SELFTEST != 0) && (APP_HOST_HW_SELFTEST_DEFER_SLOW != 0)
+        if(s_first_gui_frame == 0u) {
+            s_first_gui_frame = 1u;
+        } else if(s_hw_deferred_done == 0u) {
+            s_hw_deferred_done = 1u;
+            app_host_hw_selftest_run_deferred();
+        }
+#endif
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1u));
+#else
         if(g_screen3_need_init && lv_scr_act() == guider_ui.screen_3) {
             screen3_init_scroll_layout();
             screen3_apply_uniform_menu_style();
-            screen3_set_menu_selected(g_screen3_pending_index);
+            screen3_set_menu_selected(g_screen3_p ending_index);
             screen3_scroll_to_item(g_screen3_pending_index);
             g_screen3_need_init = 0u;
         }
@@ -167,6 +213,7 @@ static void app_gui_task(void *argument)
         }
 
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(g_app_scr == APP_SCR_11 ? 10u : 5u));
+#endif
     }
 }
 
@@ -177,6 +224,9 @@ static void app_cloud_task(void *argument)
     static uint8_t s_cloud_boot_done = 0u;
 
     (void)argument;
+#if (APP_RTOS_STACK_DIAG != 0)
+    usart_debug_tx_str("[RTOS] CloudTask start\r\n");
+#endif
 #if (APP_RTOS_HEARTBEAT_DEBUG != 0)
     usart_debug_tx_str("[RTOS] CloudTask start\r\n");
 #endif
@@ -192,6 +242,9 @@ static void app_cloud_task(void *argument)
             }
             tcp_mqtt_init();
             s_cloud_boot_done = 1u;
+#if (APP_RTOS_STACK_DIAG != 0)
+            app_rtos_log_stack_hwm("Cloud");
+#endif
             vTaskDelay(pdMS_TO_TICKS(10u));
             continue;
         }
@@ -208,7 +261,7 @@ static void app_cloud_task(void *argument)
         app_wifi_scan_stuck_recover();
 
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
-        if(g_app_scr == APP_SCR_11) {
+        if(g_app_scr == APP_SCR_11 || app_wifi_scan_ui_active() != 0u) {
             uint8_t uart_work = app_wifi_scan_uart_busy();
             uint8_t conn_busy = app_wifi_connect_busy();
             uint8_t mqtt_work = (uint8_t)(
@@ -227,12 +280,11 @@ static void app_cloud_task(void *argument)
                 if(conn_busy != 0u) {
                     (void)app_wifi_connect_poll();
                 }
-                if(uart_work != 0u) {
-                    app_wifi_scan_cloud_tick();
-                }
                 cloud_ota_service_poll_5ms();
             }
-            vTaskDelay(pdMS_TO_TICKS(need_cloud ? 5u : 200u));
+            /* WiFi 界面内始终驱动扫描状态机，避免仅 need_cloud=0 时刷新无响应 */
+            app_wifi_scan_cloud_tick();
+            vTaskDelay(pdMS_TO_TICKS(need_cloud ? 5u : 20u));
             continue;
         }
 #endif
@@ -318,6 +370,9 @@ static void app_fp_task(void *argument)
     TickType_t last_wake = xTaskGetTickCount();
 
     (void)argument;
+#if (APP_RTOS_STACK_DIAG != 0)
+    app_rtos_log_stack_hwm("Fp");
+#endif
     for(;;) {
         if(app_enroll_flow_active() != 0u && g_screen8_fp_enroll_state == 1u && g_nfc_enroll_state != 1u) {
             screen8_handle_fp_enroll();
@@ -326,6 +381,7 @@ static void app_fp_task(void *argument)
     }
 }
 
+#if (APP_NFC_ENABLE != 0)
 static void app_nfc_task(void *argument)
 {
     TickType_t last_wake = xTaskGetTickCount();
@@ -338,12 +394,16 @@ static void app_nfc_task(void *argument)
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10u));
     }
 }
+#endif
 
 static void app_home_auth_task(void *argument)
 {
     TickType_t last_wake = xTaskGetTickCount();
 
     (void)argument;
+#if (APP_RTOS_STACK_DIAG != 0)
+    app_rtos_log_stack_hwm("HomeAuth");
+#endif
     for(;;) {
         app_home_auth_poll_tick();
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(10u));
@@ -354,6 +414,9 @@ static void app_home_auth_task(void *argument)
 static void app_storage_task(void *argument)
 {
     (void)argument;
+#if (APP_RTOS_STACK_DIAG != 0)
+    app_rtos_log_stack_hwm("Storage");
+#endif
     users_storage_task_register_current();
 
     for(;;) {
@@ -365,7 +428,7 @@ static TaskHandle_t s_cloud_task_hdl;
 
 static void app_boot_log_heap(const char *tag)
 {
-#if (APP_BOOT_STAGE_LOG != 0)
+#if (APP_BOOT_STAGE_LOG != 0) || (APP_RTOS_STACK_DIAG != 0)
     char buf[48];
     size_t free_bytes = xPortGetFreeHeapSize();
     size_t min_ever = xPortGetMinimumEverFreeHeapSize();
@@ -386,6 +449,17 @@ static uint8_t app_create_task_checked(TaskFunction_t fn, const char *name,
     BaseType_t rc;
 
     rc = xTaskCreate(fn, name, stack_words, NULL, prio, out_hdl);
+#if (APP_RTOS_STACK_DIAG != 0)
+    {
+        char buf[72];
+        (void)snprintf(buf, sizeof(buf),
+                       "[RTOS] task=%s rc=%ld heap_free=%u\r\n",
+                       (name != NULL) ? name : "?",
+                       (long)rc,
+                       (unsigned)xPortGetFreeHeapSize());
+        usart_debug_tx_str(buf);
+    }
+#endif
 #if (APP_BOOT_STAGE_LOG != 0)
     if(rc != pdPASS) {
         usart_debug_tx_str("[BOOT] task FAIL ");
@@ -394,6 +468,12 @@ static uint8_t app_create_task_checked(TaskFunction_t fn, const char *name,
         app_boot_log_heap("[BOOT] heap");
     }
 #endif
+    if(rc != pdPASS) {
+        usart_debug_tx_str("[BOOT] FATAL task create fail: ");
+        usart_debug_tx_str((name != NULL) ? name : "?");
+        usart_debug_tx_str("\r\n");
+        app_boot_log_heap("[BOOT] heap after fail\r\n");
+    }
     return (rc == pdPASS) ? 1u : 0u;
 }
 
@@ -411,9 +491,11 @@ static void app_create_tasks(void)
     if(ok != 0u) {
         app_wifi_scan_bind_cloud_task(s_cloud_task_hdl);
     }
+#if (APP_TEMP_DISABLE_BIOMETRIC == 0) && (APP_NFC_ENABLE != 0)
+    ok &= app_create_task_checked(app_nfc_task, "Nfc", APP_TASK_STACK_NFC, APP_TASK_PRIO_NFC, NULL);
+#endif
 #if (APP_TEMP_DISABLE_BIOMETRIC == 0)
     ok &= app_create_task_checked(app_fp_task, "Fp", APP_TASK_STACK_FP, APP_TASK_PRIO_FP, NULL);
-    ok &= app_create_task_checked(app_nfc_task, "Nfc", APP_TASK_STACK_NFC, APP_TASK_PRIO_NFC, NULL);
     ok &= app_create_task_checked(app_home_auth_task, "HomeAuth", APP_TASK_STACK_HOME_AUTH,
                                   APP_TASK_PRIO_HOME_AUTH, NULL);
 #endif
@@ -437,11 +519,16 @@ static void app_create_tasks(void)
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
+    const char *name = "unknown";
+
     (void)xTask;
-    usart_debug_tx_str("\r\n[RTOS] stack overflow task=");
-    if(pcTaskName != NULL) {
-        usart_debug_tx_str(pcTaskName);
+    if(xTask != NULL) {
+        name = pcTaskGetName(xTask);
+    } else if(pcTaskName != NULL) {
+        name = pcTaskName;
     }
+    usart_debug_tx_str("\r\n[RTOS] stack overflow task=");
+    usart_debug_tx_str(name);
     usart_debug_tx_str("\r\n");
     __disable_irq();
     while(1) {
@@ -450,7 +537,8 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 
 void vApplicationMallocFailedHook(void)
 {
-    usart_debug_tx_str("\r\n[BOOT] FATAL malloc failed (heap too small)\r\n");
+    usart_debug_tx_str("\r\n[BOOT] FATAL malloc failed (FreeRTOS heap too small)\r\n");
+    app_boot_log_heap("[BOOT] heap at malloc fail\r\n");
     __disable_irq();
     while(1) {
     }
@@ -473,16 +561,21 @@ int main(void)
 #endif
 #if (APP_TOUCH_UART_DEBUG != 0)
     usart_debug_tx_str("\r\n=== Touch debug USART1 PA9=TX PA10=RX 115200 [TP] only ===\r\n");
-#elif (APP_WIFI_UART_DEBUG != 0)
+#elif (APP_WIFI_UART_DEBUG != 0) || (APP_CLOUD_TRACE != 0)
 #if (APP_DEBUG_ON_USART6 != 0)
-    usart_debug_tx_str("\r\n=== WiFi debug USART6 PC6=TX PC7=RX 115200 ===\r\n");
+    usart_debug_tx_str("\r\n=== WiFi/Cloud debug USART6 PC6=TX PC7=RX 115200 ===\r\n");
 #else
-    usart_debug_tx_str("\r\n=== WiFi debug USART1 PA9=TX PA10=RX 115200 ===\r\n");
+    usart_debug_tx_str("\r\n=== WiFi/Cloud debug USART1 PA9=TX PA10=RX 115200 ===\r\n");
 #endif
-    usart_debug_tx_str("[FW] wifi_diag_trace_build " __DATE__ " " __TIME__ "\r\n");
+    usart_debug_tx_str("[FW] wifi_diag_trace_build " __DATE__ " " __TIME__ " ui3-wf24s\r\n");
 #endif
 #if (APP_RS485_ENABLE == 1)
     app_rs485_link_init();
+#if (APP_HOST_HW_SELFTEST != 0) && (APP_DEBUG_VIA_RS485 != 0)
+    usart_debug_tx_str("[HW] RS485 log ready (H11 DI_485 115200)\r\n");
+#endif
+#elif (APP_DEBUG_VIA_RS485 != 0)
+    usart_debug_tx_str("[HW] RS485 log only, protocol OFF (H11 115200)\r\n");
 #endif
 #if (APP_BOOT_STAGE_LOG != 0)
     usart_debug_tx_str("[BOOT] after rs485/users init\r\n");
@@ -499,7 +592,9 @@ int main(void)
         users_ensure_default_admin_if_none();
     }
 
-#if (APP_TEMP_DISABLE_BIOMETRIC == 0)
+#if (APP_HOST_HW_SELFTEST != 0)
+    app_host_hw_selftest_run_pre_ui();
+#elif (APP_TEMP_DISABLE_BIOMETRIC == 0)
     app_fp_hw_boot_diag(&g_fp_hw_inited);
 #endif
 //    led_init();                         /* 初始化LED */
@@ -516,7 +611,7 @@ int main(void)
 
     /* MFRC522 必须做一次软复位才能进入正常读卡状态；否则首页"刷卡"读不到 UID。
      * 之前只在录入页才走 init_once（含 Reset），所以重启回到首页直接刷卡无法解锁。 */
-#if (APP_TEMP_DISABLE_BIOMETRIC == 0)
+#if (APP_NFC_ENABLE != 0)
     app_nfc_hw_init_once();
 #endif
 
@@ -534,10 +629,33 @@ int main(void)
 #if (APP_BOOT_STAGE_LOG != 0)
     usart_debug_tx_str("[BOOT] after lv_port_indev_init\r\n");
 #endif
+#if (APP_HOST_HW_SELFTEST != 0)
+    app_host_hw_selftest_run_post_lcd();
+#endif
     
 #if (APP_BOOT_STAGE_LOG != 0)
     usart_debug_tx_str("[BOOT] before setup_ui\r\n");
 #endif
+#if (APP_UI_V3_ENABLE == 1)
+#if (APP_BOOT_STAGE_LOG != 0)
+    usart_debug_tx_str("[BOOT] app_ui_v3_init...\r\n");
+#endif
+    app_ui_v3_init();
+    app_home_unlock_set_poll_base(HAL_GetTick());
+#if (APP_BOOT_STAGE_LOG != 0)
+    usart_debug_tx_str("[BOOT] app_ui_v3_init done\r\n");
+    {
+        lv_mem_monitor_t mon;
+        char buf[72];
+        lv_mem_monitor(&mon);
+        (void)snprintf(buf, sizeof(buf),
+                       "[BOOT] lv_mem free=%u max_used=%u\r\n",
+                       (unsigned)mon.free_size,
+                       (unsigned)mon.max_used);
+        usart_debug_tx_str(buf);
+    }
+#endif
+#else
     setup_ui(&guider_ui);
 #if (APP_BOOT_STAGE_LOG != 0)
     usart_debug_tx_str("[BOOT] after setup_ui\r\n");
@@ -550,18 +668,10 @@ int main(void)
     usart_debug_tx_str("[BOOT] after events_init\r\n");
 #endif
     g_app_scr = APP_SCR_HOME;
-#if (APP_BOOT_STAGE_LOG != 0)
-    usart_debug_tx_str("[BOOT] after set APP_SCR_HOME\r\n");
-#endif
     lock_btn_set_selected(0);
-#if (APP_BOOT_STAGE_LOG != 0)
-    usart_debug_tx_str("[BOOT] after lock_btn_set_selected\r\n");
-#endif
     menu_btn_set_selected(0);
-#if (APP_BOOT_STAGE_LOG != 0)
-    usart_debug_tx_str("[BOOT] after menu_btn_set_selected\r\n");
-#endif
     app_home_unlock_set_poll_base(HAL_GetTick());
+#endif
 #if (APP_BOOT_STAGE_LOG != 0)
     usart_debug_tx_str("[BOOT] before lv_timer_handler\r\n");
 #endif
@@ -579,6 +689,7 @@ int main(void)
     app_create_tasks();
 #if (APP_BOOT_STAGE_LOG != 0)
     usart_debug_tx_str("[BOOT] before scheduler\r\n");
+    app_boot_log_heap("[BOOT] heap before scheduler\r\n");
 #endif
     vTaskStartScheduler();
 #elif (APP_CLOUD_ENABLE == 1)

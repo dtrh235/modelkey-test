@@ -27,6 +27,68 @@
 #include <string.h>
 #include "../../BSP/AS608/as608.h"
 #include "app_config.h"
+#if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 1)
+#include "app_rs485_link.h"
+#endif
+
+#if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 0)
+#define DBG_RS485_DE_PORT   GPIOC
+#define DBG_RS485_DE_PIN    GPIO_PIN_8
+
+static UART_HandleTypeDef s_dbg_rs485_uart;
+static uint8_t s_dbg_rs485_ok;
+
+static void dbg_rs485_de_tx(void)
+{
+    HAL_GPIO_WritePin(DBG_RS485_DE_PORT, DBG_RS485_DE_PIN, GPIO_PIN_SET);
+}
+
+static void dbg_rs485_de_rx(void)
+{
+    HAL_GPIO_WritePin(DBG_RS485_DE_PORT, DBG_RS485_DE_PIN, GPIO_PIN_RESET);
+}
+
+static void dbg_rs485_port_init(uint32_t baudrate)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_USART6_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+
+    gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = GPIO_AF8_USART6;
+    HAL_GPIO_Init(GPIOC, &gpio);
+
+    gpio.Pin = DBG_RS485_DE_PIN;
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(DBG_RS485_DE_PORT, &gpio);
+    dbg_rs485_de_rx();
+
+    s_dbg_rs485_uart.Instance = USART6;
+    s_dbg_rs485_uart.Init.BaudRate = baudrate;
+    s_dbg_rs485_uart.Init.WordLength = UART_WORDLENGTH_8B;
+    s_dbg_rs485_uart.Init.StopBits = UART_STOPBITS_1;
+    s_dbg_rs485_uart.Init.Parity = UART_PARITY_NONE;
+    s_dbg_rs485_uart.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    s_dbg_rs485_uart.Init.Mode = UART_MODE_TX_RX;
+    s_dbg_rs485_ok = (HAL_UART_Init(&s_dbg_rs485_uart) == HAL_OK) ? 1u : 0u;
+}
+
+static void dbg_rs485_tx(const uint8_t *data, uint16_t len)
+{
+    if(s_dbg_rs485_ok == 0u || data == NULL || len == 0u) {
+        return;
+    }
+    dbg_rs485_de_tx();
+    (void)HAL_UART_Transmit(&s_dbg_rs485_uart, (uint8_t *)data, len, 500u);
+    dbg_rs485_de_rx();
+}
+#endif
 
 static UART_HandleTypeDef g_uart_dbg_handle = {0};  /* printf / usart_debug_tx_str */
 static uint8_t g_uart_dbg_inited = 0u;
@@ -78,12 +140,26 @@ void usart_debug_tx_str(const char *s)
 {
     size_t n;
 
-    if(s == NULL || g_uart_dbg_inited == 0u) {
+    if(s == NULL) {
         return;
     }
     n = strlen(s);
     if(n > 400u) {
         n = 400u;
+    }
+#if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 1)
+    if(app_rs485_link_ready() != 0u) {
+        (void)app_rs485_raw_send((const uint8_t *)s, (uint16_t)n, 500u);
+        return;
+    }
+#elif (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 0)
+    if(s_dbg_rs485_ok != 0u) {
+        dbg_rs485_tx((const uint8_t *)s, (uint16_t)n);
+        return;
+    }
+#endif
+    if(g_uart_dbg_inited == 0u) {
+        return;
     }
     (void)HAL_UART_Transmit(&g_uart_dbg_handle, (uint8_t *)s, (uint16_t)n, 80u);
 }
@@ -175,8 +251,11 @@ UART_HandleTypeDef g_uart1_handle;                  /* UART??? */
  */
 void usart_init(uint32_t baudrate)
 {
-    /* 调试口：默认 USART6 PC6/PC7；APP_DEBUG_ON_USART6=0 时为 PA9/PA10 */
+#if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 0)
+    dbg_rs485_port_init(APP_DEBUG_UART_BAUD);
+#else
     usart_debug_init(APP_DEBUG_UART_BAUD);
+#endif
 
     g_uart1_handle.Instance = USART_UX;                         /* USART1 */
     g_uart1_handle.Init.BaudRate = AS608_UART_BAUDRATE;         /* AS608 common default baudrate */
@@ -263,10 +342,10 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart)
         gpio_init_struct.Alternate = GPIO_AF8_USART6;
         HAL_GPIO_Init(GPIOC, &gpio_init_struct);
     }
-#elif (APP_RS485_ENABLE == 1)
+#elif (APP_RS485_ENABLE == 1) || ((APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 0))
     else if(huart->Instance == USART6)
     {
-        /* RS485：USART6 + PC8 DE */
+        /* RS485 / 仅日志：USART6 PC6 TX PC7 RX；PC8=DE（日志发送时拉高） */
         __HAL_RCC_USART6_CLK_ENABLE();
         __HAL_RCC_GPIOC_CLK_ENABLE();
 

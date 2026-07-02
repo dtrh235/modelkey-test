@@ -39,9 +39,13 @@ static uint8_t ct_sda_rd(void)
     return (HAL_GPIO_ReadPin(s_sda_port, s_sda_pin) == GPIO_PIN_SET) ? 1u : 0u;
 }
 
+#ifndef CT_IIC_DELAY_US
+#define CT_IIC_DELAY_US  5u
+#endif
+
 static void ct_iic_delay(void)
 {
-    delay_us(5);
+    delay_us(CT_IIC_DELAY_US);
 }
 
 void ct_iic_bind(GPIO_TypeDef *scl_port, uint16_t scl_pin, GPIO_TypeDef *sda_port, uint16_t sda_pin, uint8_t bus_id)
@@ -88,6 +92,71 @@ uint8_t ct_iic_pin_read_sda(void)
 uint8_t ct_iic_pin_read_scl(void)
 {
     return (HAL_GPIO_ReadPin(s_scl_port, s_scl_pin) == GPIO_PIN_SET) ? 1u : 0u;
+}
+
+void ct_iic_gpio_line_test(ct_iic_gpio_test_t *out)
+{
+    if(out == NULL) {
+        return;
+    }
+
+    out->scl_low = 0u;
+    out->scl_high = 0u;
+    out->sda_low = 0u;
+    out->sda_high = 0u;
+
+    ct_scl_wr(0);
+    ct_iic_delay();
+    if(ct_iic_pin_read_scl() == 0u) {
+        out->scl_low = 1u;
+    }
+    ct_scl_wr(1);
+    ct_iic_delay();
+    if(ct_iic_pin_read_scl() != 0u) {
+        out->scl_high = 1u;
+    }
+
+    ct_sda_wr(0);
+    ct_iic_delay();
+    if(ct_sda_rd() == 0u) {
+        out->sda_low = 1u;
+    }
+    ct_sda_wr(1);
+    ct_iic_delay();
+    if(ct_sda_rd() != 0u) {
+        out->sda_high = 1u;
+    }
+}
+
+uint8_t ct_iic_bus_scan(uint8_t *addr_wr, uint8_t max, uint8_t *found)
+{
+    uint8_t n = 0u;
+    uint8_t a7;
+
+    if(found != NULL) {
+        *found = 0u;
+    }
+    if(addr_wr == NULL || max == 0u) {
+        return 0u;
+    }
+
+    for(a7 = 1u; a7 < 0x7Fu; a7++) {
+        uint8_t wr = (uint8_t)(a7 << 1);
+        if(ct_iic_probe_wr(wr) == 0u) {
+            addr_wr[n++] = wr;
+            if(found != NULL) {
+                *found = n;
+            }
+            if(n >= max) {
+                break;
+            }
+        }
+    }
+
+    if(found != NULL) {
+        *found = n;
+    }
+    return n;
 }
 
 uint8_t ct_iic_rd_reg_trace(uint8_t dev_wr, uint8_t dev_rd, uint8_t reg, uint8_t *buf, uint8_t len, uint8_t *ack0, uint8_t *ack1, uint8_t *ack2)

@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "app_board_gpio.h"
 #include "app_home_unlock.h"
 #include "app_screen1_unlock.h"
 #include "app_unlock_uart4.h"
@@ -22,6 +23,7 @@
 #endif
 
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_SLAVE
+/* 与主机 cloud_method_to_code / 阿里云 unlock_method 枚举一致（从机无 4=phone） */
 static uint8_t unlock_method_to_id(const char *method)
 {
     if(method == NULL) {
@@ -35,6 +37,9 @@ static uint8_t unlock_method_to_id(const char *method)
     }
     if(strcmp(method, "temporary-password") == 0 || strcmp(method, "temporary") == 0) {
         return 5u;
+    }
+    if(strcmp(method, "remote") == 0 || strcmp(method, "phone") == 0) {
+        return 0u;
     }
     return 1u;
 }
@@ -84,16 +89,24 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
 
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_SLAVE
     /* 硬件开锁先走；RS485 上报等主机侧校时窗口后再发（与主机开锁记录策略一致） */
-    app_unlock_uart4_on_unlock_ok(account, method);
-    if(app_slave_host_time_ready() != 0u) {
-        SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] acc=%s mtd=%s -> rs485 now",
-                               account, method);
-        app_rs485_slave_unlock_notify_async(account, unlock_method_to_id(method));
-    } else {
-        SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] acc=%s mtd=%s -> rs485 queue wait_ms=%lu",
-                               account, method,
-                               (unsigned long)app_slave_host_time_ms_until_ready());
-        app_slave_unlock_queue_push(account, unlock_method_to_id(method));
+    {
+        uint8_t mid = unlock_method_to_id(method);
+
+        board_relay_unlock_pulse();
+        app_unlock_uart4_on_unlock_ok(account, method);
+        if(mid == 0u) {
+            return;
+        }
+        if(app_slave_host_time_ready() != 0u) {
+            SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] acc=%s mtd=%s -> rs485 now",
+                                   account, method);
+            app_rs485_slave_unlock_notify_async(account, mid);
+        } else {
+            SLAVE_UNLOCK_CLOUD_LOG("[SLV][UNLOCK] acc=%s mtd=%s -> rs485 queue wait_ms=%lu",
+                                   account, method,
+                                   (unsigned long)app_slave_host_time_ms_until_ready());
+            app_slave_unlock_queue_push(account, mid);
+        }
     }
 #if (APP_USE_FREERTOS == 1)
     s_unlock_popup_type = popup_type;
@@ -125,6 +138,7 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
         }
     }
 
+    board_relay_unlock_pulse();
     app_unlock_uart4_on_unlock_ok(account, method);
     cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, account);
     cloud_ota_service_report_unlock_record(account, method, HAL_GetTick());

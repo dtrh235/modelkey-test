@@ -1,5 +1,9 @@
 #include "app_wall_clock.h"
 #include "app_wifi_diag.h"
+#include "app_config.h"
+#if (APP_UI_V3_ENABLE == 1)
+#include "ui_v3/app_ui_v3.h"
+#endif
 
 #include "stm32f4xx_hal.h"
 
@@ -148,6 +152,16 @@ static int s_home_ui_h;
 static int s_home_ui_mi;
 static int s_home_ui_s;
 
+void app_home_wall_clock_set(int year, int month, int day, int hour, int min, int sec)
+{
+    app_wall_clock_schedule_home_ui(year, month, day, hour, min, sec);
+}
+
+void app_home_wall_clock_refresh_ui(void)
+{
+    app_wall_clock_schedule_ui_refresh();
+}
+
 void app_wall_clock_schedule_home_ui(int year, int month, int day, int hour, int min, int sec)
 {
     s_home_ui_y = year;
@@ -176,12 +190,20 @@ void app_wall_clock_gui_poll(void)
         return;
     }
     s_home_ui_pending = 0u;
+#if (APP_UI_V3_ENABLE == 1)
+    if(s_home_ui_has_set != 0u) {
+        app_wall_clock_on_set(s_home_ui_y, s_home_ui_mo, s_home_ui_d,
+                              s_home_ui_h, s_home_ui_mi, s_home_ui_s);
+    }
+    ui3_wall_clock_refresh();
+#else
     if(s_home_ui_has_set != 0u) {
         app_home_wall_clock_set(s_home_ui_y, s_home_ui_mo, s_home_ui_d,
                                 s_home_ui_h, s_home_ui_mi, s_home_ui_s);
     } else {
         app_home_wall_clock_refresh_ui();
     }
+#endif
 }
 
 void app_wall_clock_on_set(int year, int month, int day, int hour, int min, int sec)

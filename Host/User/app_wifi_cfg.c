@@ -92,3 +92,11 @@ void app_wifi_cfg_clear_reconnect_request(void)
 {
     s_wifi_reconnect_req = 0u;
 }
+
+void app_wifi_cfg_mark_reconnect_if_saved(void)
+{
+    app_wifi_cfg_init_defaults();
+    if(s_wifi_ssid[0] != '\0') {
+        s_wifi_reconnect_req = 1u;
+    }
+}

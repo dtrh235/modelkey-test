@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JoyfulZone — 门锁界面预览</title>
+  <link rel="stylesheet" href="css/preview.css">
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="brand">Joyful<br>Zone</div>
+      <p class="sub">
+        modelkey 门锁 UI 预览<br>
+        纸质文艺 · 暖色纸感 · 锁孔主视觉<br>
+        240×320 · 仅 HTML 预览，不改固件
+      </p>
+      <nav id="sidebar-nav"></nav>
+      <div class="demo-box">
+        <strong>演示凭证</strong><br>
+        开锁 20230101 / 1234<br>
+        管理 admin / admin<br>
+        查找 20230215<br><br>
+        <strong>触屏手势</strong><br>
+        左滑 → 返回上一页<br>
+        上下滑 → 列表滚动<br>
+        首页横滑 → 切换底栏选项<br>
+        首页双击 → 感应开锁<br><br>
+        <strong>物理键</strong><br>
+        输入框用下方方向键 + 确认
+      </div>
+    </aside>
+
+    <main class="stage">
+      <div class="stage-header">
+        <h2>JoyfulZone 智慧门禁</h2>
+        <p>纸质文艺浅色风 — 锁孔主视觉、缓慢纸面动效、全屏暖色开锁涟漪、触屏手势与物理键分工</p>
+        <span class="tag">Preview v0.3</span>
+      </div>
+
+      <div class="device-wrap">
+        <div class="device-shell">
+          <div class="device-label">240 × 320 触屏</div>
+          <div class="device-screen">
+            <div id="screen-root"></div>
+            <div id="modal-overlay" class="modal-overlay"></div>
+            <div id="toast" class="toast"></div>
+          </div>
+        </div>
+
+        <div class="key-hints" id="key-hints">
+          <button class="key-hint" data-key="UP">↑</button>
+          <button class="key-hint" data-key="DOWN">↓</button>
+          <button class="key-hint" data-key="LEFT">←</button>
+          <button class="key-hint" data-key="RIGHT">→</button>
+          <button class="key-hint" data-key="OK">确认</button>
+          <button class="key-hint" data-key="ESC">返回</button>
+          <button class="key-hint accent" data-key="RANDOM">感应开锁</button>
+        </div>
+      </div>
+
+      <p class="screen-info" id="screen-info-text">当前：<strong>首页</strong> · 240×320 · v0.3</p>
+    </main>
+  </div>
+  <script src="js/touch.js"></script>
+  <script src="js/preview.js"></script>
+</body>
+</html>

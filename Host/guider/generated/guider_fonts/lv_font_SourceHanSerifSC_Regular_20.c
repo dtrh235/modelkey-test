@@ -4172,8 +4172,7 @@ lv_font_t lv_font_SourceHanSerifSC_Regular_20 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    /* “开/锁”在思源子集内；“已”在 SimSun CJK 内，走 fallback 才能单标签完整显示 */
-    .fallback = &lv_font_simsun_16_cjk,
+    .fallback = NULL,
 #endif
     .user_data = NULL,
 };

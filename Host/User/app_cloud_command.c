@@ -2,6 +2,7 @@
 
 #include "app_config.h"
 #include "app_cloud_bind_cmd.h"
+#include "app_wifi_modem.h"
 #include "cloud_aliyun_at.h"
 #include "SYSTEM/usart/usart.h"
 #include "stm32f4xx_hal.h"
@@ -19,6 +20,12 @@ void app_cloud_command_on_suback_for_pkt(uint16_t pkt_id) { (void)pkt_id; }
 uint8_t app_cloud_command_waiting_suback(void) { return 0u; }
 uint8_t app_cloud_command_is_ready(void) { return 0u; }
 uint8_t app_cloud_command_on_mqtt_publish(const uint8_t *buf, uint16_t len)
+{
+    (void)buf;
+    (void)len;
+    return 0u;
+}
+uint8_t app_cloud_command_on_mqtt_plain(const uint8_t *buf, uint16_t len)
 {
     (void)buf;
     (void)len;
@@ -49,8 +56,9 @@ void app_cloud_command_diag_status(char *buf, size_t buf_sz)
 #define CMD_DIAG_INTERVAL_MS      2000u
 /** 无业务上行时定期 presence，供后端/App 感知在线（非物模型 heartbeat） */
 #define CMD_PRESENCE_IDLE_MS      25000u
-/* NTP 未同步时最多等待此时长仍订阅 terminal/get（避免云端在线但永远不可配对） */
+/* NTP 未同步时最多等待此时长仍订阅 terminal/get（ESP8266）；WF24 立即订阅 */
 #define CMD_NTP_WAIT_MAX_MS       30000u
+#define CMD_NTP_WAIT_WF24_MS      0u
 static char s_cmd_topic[96];
 static char s_push_topic[96];
 static uint8_t s_cmd_sub_sent;
@@ -311,12 +319,18 @@ void app_cloud_command_poll(void)
     if(cloud_aliyun_at_time_is_synced() == 0u &&
        cloud_aliyun_at_ntp_give_up() == 0u) {
         static uint32_t s_wait_sync_log_ms;
+        uint32_t ntp_wait_max = CMD_NTP_WAIT_MAX_MS;
+#if (MODEM_USE_NATIVE_MQTT != 0)
+        /* App 远程开锁/临时密码 ack 超时 8s，不能等 NTP 30s 才订 terminal/get */
+        ntp_wait_max = CMD_NTP_WAIT_WF24_MS;
+#endif
 
         now = HAL_GetTick();
         if(s_cmd_ntp_wait_since_ms == 0u) {
             s_cmd_ntp_wait_since_ms = now;
         }
-        if((now - s_cmd_ntp_wait_since_ms) < CMD_NTP_WAIT_MAX_MS) {
+        if(ntp_wait_max > 0u &&
+           (now - s_cmd_ntp_wait_since_ms) < ntp_wait_max) {
             if(s_wait_sync_log_ms == 0u ||
                (now - s_wait_sync_log_ms) >= 3000u) {
                 s_wait_sync_log_ms = now;
@@ -325,7 +339,9 @@ void app_cloud_command_poll(void)
             }
             return;
         }
-        CMD_LOG("[CLOUD][CMD] NTP wait timeout, subscribe anyway\r\n");
+        if(ntp_wait_max > 0u) {
+            CMD_LOG("[CLOUD][CMD] NTP wait timeout, subscribe anyway\r\n");
+        }
     }
     s_cmd_ntp_wait_since_ms = 0u;
     {
@@ -397,6 +413,28 @@ uint8_t app_cloud_command_on_mqtt_publish(const uint8_t *buf, uint16_t len)
     }
     CMD_LOG("[CLOUD][CMD] downlink ignored\r\n");
     return (json != NULL) ? 1u : 0u;
+}
+
+uint8_t app_cloud_command_on_mqtt_plain(const uint8_t *buf, uint16_t len)
+{
+    const char *json;
+
+    if(s_cmd_sub_ok == 0u || buf == NULL || len < 2u) {
+        return 0u;
+    }
+    if(buf[0] != '{' && buf[0] != '[') {
+        return 0u;
+    }
+    if(cmd_buf_has_ntp_json(buf, len) != 0u) {
+        return 0u;
+    }
+    cmd_log_payload_preview(buf, len);
+    json = (const char *)buf;
+    if(app_cloud_bind_handle_json(json, len) != 0u) {
+        return 1u;
+    }
+    CMD_LOG("[CLOUD][CMD] plain downlink ignored\r\n");
+    return 1u;
 }
 
 #endif /* APP_CLOUD_COMMAND_ENABLE */

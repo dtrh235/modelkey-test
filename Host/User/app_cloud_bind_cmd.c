@@ -289,12 +289,38 @@ void app_cloud_publish_temp_password_used(const char *guest_account)
     BIND_LOGF("[CLOUD][TEMP] used pub fail acc=%s\r\n", guest_account);
 }
 
+#define CLOUD_CMD_DEDUP_MS  3000u
+
+static uint8_t cloud_cmd_is_duplicate(const char *cmd, const char *req_id)
+{
+    static char s_last_cmd[32];
+    static char s_last_id[24];
+    static uint32_t s_last_ms;
+    uint32_t now;
+
+    if(cmd == NULL || req_id == NULL || req_id[0] == '\0') {
+        return 0u;
+    }
+    now = HAL_GetTick();
+    if(s_last_ms != 0u &&
+       (now - s_last_ms) < CLOUD_CMD_DEDUP_MS &&
+       strcmp(s_last_cmd, cmd) == 0 &&
+       strcmp(s_last_id, req_id) == 0) {
+        return 1u;
+    }
+    strncpy(s_last_cmd, cmd, sizeof(s_last_cmd) - 1u);
+    s_last_cmd[sizeof(s_last_cmd) - 1u] = '\0';
+    strncpy(s_last_id, req_id, sizeof(s_last_id) - 1u);
+    s_last_id[sizeof(s_last_id) - 1u] = '\0';
+    s_last_ms = now;
+    return 0u;
+}
+
 static void cloud_publish_cmd_ack(const char *ack_cmd, uint8_t success, const char *req_id)
 {
     char topic[96];
     char json[160];
     const char *id;
-    uint8_t try;
 
     if(ack_cmd == NULL || cloud_aliyun_at_is_online() == 0u) {
         return;
@@ -308,12 +334,7 @@ static void cloud_publish_cmd_ack(const char *ack_cmd, uint8_t success, const ch
                    ack_cmd,
                    success ? 1u : 0u,
                    id);
-    for(try = 0u; try < 3u; try++) {
-        if(cloud_aliyun_at_mqtt_publish_qos0(topic, json) != 0u) {
-            return;
-        }
-        cloud_aliyun_at_pump_mqtt_ctrl();
-    }
+    (void)cloud_aliyun_at_mqtt_publish_qos0(topic, json);
 }
 
 uint8_t app_cloud_bind_handle_json(const char *json, uint16_t len)
@@ -332,6 +353,9 @@ uint8_t app_cloud_bind_handle_json(const char *json, uint16_t len)
 
     req_id[0] = '\0';
     (void)bind_json_extract_string(json, "id", req_id, sizeof(req_id));
+    if(req_id[0] != '\0' && cloud_cmd_is_duplicate(cmd, req_id) != 0u) {
+        return 1u;
+    }
 
     if(strcmp(cmd, "unbind") == 0) {
         app_pair_clear_bind();
@@ -369,11 +393,11 @@ uint8_t app_cloud_bind_handle_json(const char *json, uint16_t len)
             valid_sec = 300ull;
         }
         if(app_temp_password_add(app_account, password, (uint32_t)valid_sec) != 0u) {
+            cloud_publish_cmd_ack("temp_password_ack", 1u, req_id);
+            BIND_LOGF("[CLOUD][TEMP] set ok acc=%s\r\n", app_account);
 #if (APP_RS485_ENABLE == 1)
             (void)app_rs485_proto_slave_temp_password_set(app_account, password, (uint32_t)valid_sec, 600u);
 #endif
-            cloud_publish_cmd_ack("temp_password_ack", 1u, req_id);
-            BIND_LOGF("[CLOUD][TEMP] set ok acc=%s\r\n", app_account);
         } else {
             cloud_publish_cmd_ack("temp_password_ack", 0u, req_id);
             BIND_LOGF("[CLOUD][TEMP] set fail acc=%s\r\n", app_account);

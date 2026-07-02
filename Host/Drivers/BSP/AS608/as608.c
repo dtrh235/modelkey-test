@@ -143,14 +143,13 @@ static uint8_t *JudgeStr(uint16_t waittime)
 {
     uint16_t i;
     uint16_t widx;
+    uint32_t t0 = HAL_GetTick();
 
-	while(--waittime)
-	{
-		as608_uart_poll_rx();
-		HAL_Delay(1);
-		if(RX_len) /* 接收到一次数据 */
-		{
-			RX_len = 0;
+    while((HAL_GetTick() - t0) < (uint32_t)waittime) {
+        as608_uart_poll_rx();
+        if(RX_len) /* 接收到一次数据 */
+        {
+            RX_len = 0;
             widx = s_as608_rx_widx;
             if(widx < 10u) {
                 continue;
@@ -165,9 +164,9 @@ static uint8_t *JudgeStr(uint16_t waittime)
                     return &aRxBuffer[i];
                 }
             }
-		}
-	}
-	return 0;
+        }
+    }
+    return 0;
 }
 //录入图像 GZ_GetImage
 //功能:探测手指，探测到后录入指纹图像存于ImageBuffer。 
@@ -644,7 +643,6 @@ uint8_t GZ_ValidTempleteNum(uint16_t *ValidN)
 //说明: 模块返新地址（正确地址）	
 uint8_t GZ_HandShake(uint32_t *GZ_Addr)
 {
-	uint16_t wait;
 	SendHead();
 	SendAddr();
 	Com_SendData(0X01);
@@ -652,13 +650,17 @@ uint8_t GZ_HandShake(uint32_t *GZ_Addr)
 	Com_SendData(0X00);
 	/* AS608 握手应答包共 12 字节(EF 01 + 4B addr + 07 + 2B len + confirm + 2B chk)，
 	 * 57600 baud 下整包 ~2ms。
-	 * 之前是固定 HAL_Delay(200)，模块没插也要傻等满 200ms。
-	 * 现在等到整包到齐(s_as608_rx_widx>=12)即可退出，模块在线 ~5ms 返回；
-	 * 模块不在线则等满 200ms 再判定失败——保证 aRxBuffer[6] 一定读到的是真正的字节6而不是缓冲区残留。 */
-	for(wait = 0u; wait < 200u; wait++) {
-		as608_uart_poll_rx();
-		HAL_Delay(1);
-		if(s_as608_rx_widx >= 12u) break;
+	 * 等到整包到齐(s_as608_rx_widx>=12)即可退出；模块不在线则等满 200ms。
+	 * 禁止 HAL_Delay(1)：USART 仅 1 字节 DR，延时期间会 ORE 丢包。 */
+	{
+		uint32_t t0 = HAL_GetTick();
+
+		while((HAL_GetTick() - t0) < 200u) {
+			as608_uart_poll_rx();
+			if(s_as608_rx_widx >= 12u) {
+				break;
+			}
+		}
 	}
 	if(s_as608_rx_widx >= 12u || RX_len)
 	{

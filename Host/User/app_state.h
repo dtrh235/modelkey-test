@@ -3,7 +3,10 @@
 
 #include <stdint.h>
 #include "lvgl.h"
+#include "app_config.h"
+#if (APP_LEGACY_UI_ENABLE != 0)
 #include "gui_guider.h"
+#endif
 #include "app_screen.h"
 #include "app_screen6_types.h"
 #include "app_user_ops.h"
@@ -15,7 +18,9 @@ typedef enum {
     NFC_OP_REPLACE_SCREEN9
 } nfc_op_t;
 
+#if (APP_LEGACY_UI_ENABLE != 0)
 extern lv_ui guider_ui;
+#endif
 
 extern volatile app_scr_t g_app_scr;
 /* 1=WiFi 设置页独占：Cloud 仅扫描/连热点，停 MQTT/OTA */
@@ -112,6 +117,7 @@ extern uint8_t g_screen9_msgbox_state;
 extern uint32_t g_nfc_enroll_start_time;
 extern uint8_t g_nfc_enroll_state;
 extern uint8_t g_nfc_enroll_result;
+extern uint8_t g_nfc_enroll_dup;
 extern volatile uint8_t g_nfc_last_detect_result;
 extern volatile uint8_t g_nfc_last_uid[4];
 extern uint32_t g_home_fp_last_poll_ms;
@@ -124,5 +130,9 @@ extern uint16_t g_fp_pending_page_id;
 extern uint8_t g_fp_pending_page2_valid;
 extern uint16_t g_fp_pending_page_id_2;
 extern lv_timer_t *g_screen8_result_timer;
+
+/* UI v3 / screen10：指纹录入完成后绑定到指定账号（非 screen8 待提交槽） */
+extern char g_enroll_target_acc[13];
+extern uint8_t g_enroll_ui_v3_mode;
 
 #endif

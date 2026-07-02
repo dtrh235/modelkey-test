@@ -161,11 +161,21 @@ module.exports = function (payload, topic) {
 |--------|------|------|
 | `unlock_account` | text | 开锁账号，如 `1001` |
 | `unlock_time` | text | `YYYY.MM.DD HH:MM`（墙钟同步后） |
-| `unlock_method` | enum | `1`password `2`nfc `3`fingerprint **`4`phone（手机 App）** |
-| `unlock_device` | int | `1`门锁主屏 `2`侧门从机 **`3`手机** |
-| `unlock_account` | text | 手机远程开锁固定 **`0`**（0 不可作为普通用户账号） |
+| `unlock_method` | enum | `1`password `2`nfc `3`fingerprint `4`phone `5`temporary-password |
+| `unlock_device` | int | `1`门锁主屏 `2`侧门从机 `3`手机 |
+| `unlock_account` | text | 普通用户账号；远程固定 **`0`**；临时密码固定 **`temporary account`** |
 
-固件 `cloud_ota_service.c` 已按上表上报；**手机远程开锁**走 `app_unlock_event` → `method=remote` → `unlock_method=4`。
+**主机与从机 `unlock_method` 一致**（与阿里云控制台枚举一一对应），区别仅在于：
+
+| method | 含义 | 主机 | 从机（RS485→主机上报） |
+|--------|------|------|------------------------|
+| 1 | password | ✅ device=1 | ✅ device=**2** |
+| 2 | nfc | ✅ device=1 | ✅ device=**2** |
+| 3 | fingerprint | ✅ device=1 | ✅ device=**2** |
+| 4 | phone | ✅ device=3，account=0 | ❌ 从机无远程开锁 |
+| 5 | temporary-password | ✅ device=1 | ✅ device=**2**，account=temporary account |
+
+固件 `cloud_ota_service.c` 已按上表上报；**手机远程开锁**仅主机：`method=remote` → `unlock_method=4`。
 
 ### 后端收记录（推荐：门锁经 terminal/push 桥接）
 

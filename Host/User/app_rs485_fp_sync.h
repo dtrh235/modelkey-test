@@ -43,7 +43,8 @@ typedef struct {
 #define RS485_UNLOCK_DEVICE_MASTER     1u
 #define RS485_UNLOCK_DEVICE_SLAVE      2u
 typedef struct {
-    uint8_t method_id; /* 1=密码 2=NFC 3=指纹 */
+    /* unlock_method 枚举：1password 2nfc 3fingerprint 5temporary-password（从机无 4phone） */
+    uint8_t method_id;
     uint8_t device_id; /* RS485_UNLOCK_DEVICE_*，与阿里云 unlock_device 一致 */
     char    acc[12];
 } rs485_unlock_notify_t;

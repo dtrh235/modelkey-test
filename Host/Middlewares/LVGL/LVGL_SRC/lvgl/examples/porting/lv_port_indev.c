@@ -97,6 +97,8 @@ void lv_port_indev_init(void)
     lv_indev_drv_init(&indev_drv);
     indev_drv.type = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb = touchpad_read;
+    indev_drv.scroll_limit = 8;
+    indev_drv.scroll_throw = 12;
     indev_touchpad = lv_indev_drv_register(&indev_drv);
 
     /*------------------
@@ -197,10 +199,26 @@ static void touchpad_init(void)
 static void touchpad_read(lv_indev_drv_t * indev_drv, lv_indev_data_t * data)
 {
     (void)indev_drv;
-    /* 全项目统一 app_touch_ui 读触摸并处理点击；LVGL indev 不参与 */
+#if (APP_UI_V3_ENABLE == 1)
+    tp_dev.scan(0);
+    if(tp_dev.sta & TP_PRES_DOWN) {
+        lv_coord_t x = (lv_coord_t)tp_dev.x[0];
+        lv_coord_t y = (lv_coord_t)tp_dev.y[0];
+#if (APP_TP_MIRROR_X != 0)
+        x = (lv_coord_t)(240 - 1 - x);
+#endif
+        data->point.x = x;
+        data->point.y = y;
+        data->state = LV_INDEV_STATE_PR;
+    } else {
+        data->state = LV_INDEV_STATE_REL;
+    }
+#else
+    /* 旧 UI：app_touch_ui 读触摸；LVGL indev 不参与 */
     data->state = LV_INDEV_STATE_REL;
     data->point.x = 0;
     data->point.y = 0;
+#endif
 }
 
 /*------------------

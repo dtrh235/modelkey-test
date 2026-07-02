@@ -12,6 +12,8 @@
 #include "lv_port_disp.h"
 #include <stdbool.h>
 #include "./BSP/LCD/lcd.h"
+#include "app_ccm_ram.h"
+#include "app_config.h"
 
 /*********************
  *      DEFINES
@@ -24,9 +26,9 @@
     #define MY_DISP_VER_RES    320
 #endif
 
-/* 恢复保守默认配置：10 行单缓冲 */
+/* 行缓冲越大 flush 越少；240×N×2 字节放 CCM */
 #ifndef LV_DISP_DRAW_BUF_LINES
-#define LV_DISP_DRAW_BUF_LINES    10
+#define LV_DISP_DRAW_BUF_LINES    APP_LVGL_DRAW_BUF_LINES
 #endif
 
 /**********************
@@ -87,7 +89,13 @@ void lv_port_disp_init(void)
      */
 
     static lv_disp_draw_buf_t draw_buf_dsc_1;
+#if defined(__CC_ARM) && !defined(__ARMCC_VERSION)
+#pragma arm section zidata = ".ccmram"
     static lv_color_t buf_1[MY_DISP_HOR_RES * LV_DISP_DRAW_BUF_LINES];
+#pragma arm section
+#else
+    static APP_CCM_DATA lv_color_t buf_1[MY_DISP_HOR_RES * LV_DISP_DRAW_BUF_LINES];
+#endif
     lv_disp_draw_buf_init(&draw_buf_dsc_1, buf_1, NULL,
                           MY_DISP_HOR_RES * LV_DISP_DRAW_BUF_LINES);
 
@@ -127,6 +135,14 @@ void lv_port_disp_init(void)
 
     /*Finally register the driver*/
     lv_disp_drv_register(&disp_drv);
+
+    {
+        lv_disp_t * disp = lv_disp_get_default();
+        if (disp != NULL) {
+            lv_disp_set_bg_color(disp, lv_color_black());
+            lv_disp_set_bg_opa(disp, LV_OPA_COVER);
+        }
+    }
 }
 
 /**********************

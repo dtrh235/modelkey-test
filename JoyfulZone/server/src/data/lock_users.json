@@ -1,15 +1,5 @@
 [
   {
-    "id": "846697301cdbd4e1",
-    "deviceName": "1111",
-    "acc": "3",
-    "isAdmin": false,
-    "pwd": true,
-    "nfc": true,
-    "fp": true,
-    "updatedAt": 1781151077825
-  },
-  {
     "id": "8d7e4580fd3aaf28",
     "deviceName": "1111",
     "acc": "1",
@@ -17,7 +7,7 @@
     "pwd": true,
     "nfc": false,
     "fp": false,
-    "updatedAt": 1781150977388
+    "updatedAt": 1781663081340
   },
   {
     "id": "48ef03d59d0136da",
@@ -27,46 +17,16 @@
     "pwd": true,
     "nfc": true,
     "fp": false,
-    "updatedAt": 1781150977388
+    "updatedAt": 1781663081340
   },
   {
-    "id": "39b0e4ec9b63cbe4",
+    "id": "846697301cdbd4e1",
     "deviceName": "1111",
-    "acc": "4",
+    "acc": "3",
     "isAdmin": true,
     "pwd": true,
-    "nfc": true,
-    "fp": false,
-    "updatedAt": 1781150977388
-  },
-  {
-    "id": "33f690da43ff9340",
-    "deviceName": "1111",
-    "acc": "5",
-    "isAdmin": false,
-    "pwd": true,
-    "nfc": true,
-    "fp": false,
-    "updatedAt": 1781150977388
-  },
-  {
-    "id": "ff8622e17ff91860",
-    "deviceName": "1111",
-    "acc": "6",
-    "isAdmin": false,
-    "pwd": true,
     "nfc": false,
-    "fp": false,
-    "updatedAt": 1781150977388
-  },
-  {
-    "id": "6ce40d90f4e88cfd",
-    "deviceName": "1111",
-    "acc": "7",
-    "isAdmin": false,
-    "pwd": true,
-    "nfc": false,
-    "fp": false,
-    "updatedAt": 1781150977388
+    "fp": true,
+    "updatedAt": 1781663081340
   }
 ]

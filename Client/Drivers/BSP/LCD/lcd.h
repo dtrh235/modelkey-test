@@ -38,6 +38,9 @@
 #define LCD_CS_GPIO_PIN                 GPIO_PIN_7
 #define LCD_CS_GPIO_CLK_ENABLE()        do { __HAL_RCC_GPIOE_CLK_ENABLE(); } while (0)
 
+/* SPI1 SCK：PCLK2=84MHz，/4≈21MHz */
+#define LCD_SPI_BAUDRATE_PRESCALER      SPI_BAUDRATEPRESCALER_4
+
 /******************************************************************************************/
 
 /* LCD????????? */

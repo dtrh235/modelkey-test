@@ -103,6 +103,7 @@ static void app_gui_task(void *argument)
     (void)argument;
     for(;;) {
         app_home_unlock_housekeeping();
+        board_relay_poll();
 #if APP_RS485_IS_SLAVE
         app_unlock_event_gui_poll();
 #endif

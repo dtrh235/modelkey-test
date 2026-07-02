@@ -1,5 +1,33 @@
 #include "app_key_ui.h"
 
+#include "app_config.h"
+#include "./BSP/KEY/key.h"
+
+#if (APP_UI_V3_ENABLE == 1)
+#include "ui_v3/app_ui_v3_keys.h"
+#endif
+
+#if (APP_LEGACY_UI_ENABLE == 0)
+
+void app_key_ui_dispatch(KeyValue_t key)
+{
+    if(key == KEY_NONE) {
+        return;
+    }
+#if (APP_UI_V3_ENABLE == 1)
+    (void)app_ui_v3_key_dispatch(key);
+#else
+    (void)key;
+#endif
+}
+
+void app_key_ui_handle(void)
+{
+    app_key_ui_dispatch(KEY_Scan_WithDebounce(20));
+}
+
+#else
+
 #include <stdbool.h>
 #include <string.h>
 
@@ -35,6 +63,10 @@
 #include "app_state.h"
 #include "app_home_nav_btns.h"
 #include "cloud_ota_service.h"
+#include "app_config.h"
+#if (APP_UI_V3_ENABLE == 1)
+#include "ui_v3/app_ui_v3_keys.h"
+#endif
 
 #include "./BSP/KEY/key.h"
 
@@ -45,6 +77,12 @@ extern uint32_t HAL_GetTick(void);
 void app_key_ui_dispatch(KeyValue_t key)
 {
     if(key == KEY_NONE) return;
+
+#if (APP_UI_V3_ENABLE == 1)
+    if(app_ui_v3_key_dispatch(key) != 0u) {
+        return;
+    }
+#endif
 
     if(g_app_scr == APP_SCR_HOME) {
         if(key == KEY_RIGHT) {
@@ -526,3 +564,5 @@ void app_key_ui_handle(void)
 {
     app_key_ui_dispatch(KEY_Scan_WithDebounce(20));
 }
+
+#endif /* APP_LEGACY_UI_ENABLE */

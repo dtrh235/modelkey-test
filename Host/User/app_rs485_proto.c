@@ -197,6 +197,9 @@ static const char *rs485_unlock_method_name(uint8_t method_id)
     if(method_id == 3u) {
         return "fingerprint";
     }
+    if(method_id == 5u) {
+        return "temporary-password";
+    }
     return "password";
 }
 
@@ -231,6 +234,7 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
     uint8_t mid;
     int device_id;
     const char *mtd;
+    const char *pub_acc;
 
     if(pl == NULL) {
         HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx reject null pl\r\n");
@@ -253,10 +257,9 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
         return;
     }
     acc[12] = '\0';
-    if(device_id != CLOUD_UNLOCK_DEVICE_MASTER && device_id != CLOUD_UNLOCK_DEVICE_SLAVE) {
-        device_id = CLOUD_UNLOCK_DEVICE_SLAVE;
-    }
-    if(mid < 1u || mid > 3u) {
+    /* 从机 RS485 开锁：unlock_device 固定为侧门从机(2) */
+    device_id = CLOUD_UNLOCK_DEVICE_SLAVE;
+    if(mid < 1u || mid > 5u || mid == 4u) {
         HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx reject mid=%u plen=%u acc=%s\r\n",
                               (unsigned)mid, (unsigned)plen, acc);
         return;
@@ -274,15 +277,21 @@ static void host_rs485_slave_unlock_forward_cloud(const uint8_t *pl, uint16_t pl
             }
         }
     }
-    mtd = rs485_unlock_method_name(mid);
-    if(host_rs485_slave_unlock_is_duplicate(acc, mid) != 0u) {
-        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx dedup skip acc=%s mtd=%s\r\n", acc, mtd);
+    if(mid == 5u) {
+        mtd = "temporary-password";
+        pub_acc = "temporary account";
+    } else {
+        mtd = rs485_unlock_method_name(mid);
+        pub_acc = acc;
+    }
+    if(host_rs485_slave_unlock_is_duplicate(pub_acc, mid) != 0u) {
+        HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx dedup skip acc=%s mtd=%s\r\n", pub_acc, mtd);
         return;
     }
     HOST_UNLOCK_CLOUD_LOG("[UNLOCK] slave rx acc=%s mtd=%s dev=%d plen=%u -> cloud\r\n",
-                          acc, mtd, device_id, (unsigned)plen);
-    cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, acc);
-    cloud_ota_service_report_unlock_record_ex(acc, mtd, HAL_GetTick(), device_id);
+                          pub_acc, mtd, device_id, (unsigned)plen);
+    cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, pub_acc);
+    cloud_ota_service_report_unlock_record_ex(pub_acc, mtd, HAL_GetTick(), device_id);
 }
 #endif
 

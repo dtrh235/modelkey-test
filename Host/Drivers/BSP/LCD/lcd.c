@@ -4,6 +4,9 @@
 #include "lcdfont.h"
 #include "./SYSTEM/usart/usart.h"
 #include "SYSTEM/delay/delay.h"
+#include "app_config.h"
+#include <stdio.h>
+#include "./BSP/W25Q16/bsp_w25q16.h"
 
 
 /* lcd_ex.c??????LCD????IC??????????????????,???lcd.c,??.c???
@@ -24,6 +27,40 @@ _lcd_dev lcddev;
 
 static void lcd_write_ram_end(void);
 
+#if (APP_BOOT_STAGE_LOG != 0)
+static void lcd_boot_diag_log(const char *stage)
+{
+    char buf[120];
+    uint32_t pa5_moder;
+    uint32_t pa5_afr;
+    uint32_t cr1;
+
+    pa5_moder = (GPIOA->MODER >> 10) & 3u;
+    pa5_afr = (GPIOA->AFR[0] >> 20) & 0xFu;
+    cr1 = READ_REG(SPI1->CR1);
+    snprintf(buf, sizeof(buf),
+             "[LCD] %s PA5 MODER=%lu AFR=%lu idle=%u SPI1_CR1=0x%lX SPE=%u CPOL=%u\r\n",
+             (stage != NULL) ? stage : "?",
+             (unsigned long)pa5_moder, (unsigned long)pa5_afr,
+             (unsigned)HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_5),
+             (unsigned long)cr1,
+             (unsigned)((cr1 & SPI_CR1_SPE) != 0u),
+             (unsigned)((cr1 & SPI_CR1_CPOL) != 0u));
+    usart_debug_tx_str(buf);
+    snprintf(buf, sizeof(buf),
+             "[LCD] pins PA7=%u PE7_CS=%u PE6_DC=%u id=0x%04X w=%u h=%u\r\n",
+             (unsigned)HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_7),
+             (unsigned)HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_7),
+             (unsigned)HAL_GPIO_ReadPin(GPIOE, GPIO_PIN_6),
+             (unsigned)lcddev.id,
+             (unsigned)lcddev.width,
+             (unsigned)lcddev.height);
+    usart_debug_tx_str(buf);
+}
+#else
+#define lcd_boot_diag_log(stage) ((void)0)
+#endif
+
 static void lcd_cs_low(void)
 {
     HAL_GPIO_WritePin(LCD_CS_GPIO_PORT, LCD_CS_GPIO_PIN, GPIO_PIN_RESET);
@@ -32,6 +69,40 @@ static void lcd_cs_low(void)
 static void lcd_cs_high(void)
 {
     HAL_GPIO_WritePin(LCD_CS_GPIO_PORT, LCD_CS_GPIO_PIN, GPIO_PIN_SET);
+}
+
+/* CS 在整个 init/开窗/刷屏期间保持低（afiskon/stm32-ili9341 做法；逐字节拉高 CS 会白屏） */
+static uint8_t s_lcd_cs_hold;
+
+static void lcd_cs_release(void)
+{
+    if (s_lcd_cs_hold == 0u) {
+        lcd_cs_high();
+    }
+}
+
+void lcd_spi_cs_hold_begin(void)
+{
+    if (s_lcd_cs_hold == 0u) {
+        lcd_cs_low();
+    }
+    s_lcd_cs_hold++;
+}
+
+void lcd_spi_cs_hold_end(void)
+{
+    if (s_lcd_cs_hold > 0u) {
+        s_lcd_cs_hold--;
+        if (s_lcd_cs_hold == 0u) {
+            lcd_cs_high();
+        }
+    }
+}
+
+static void lcd_spi_wait_idle(void)
+{
+    while ((SPI1->SR & SPI_SR_BSY) != 0u) {
+    }
 }
 
 static void lcd_dc_cmd(void)
@@ -49,6 +120,7 @@ static void lcd_wr_pixel565(uint16_t rgb)
     uint8_t b[2] = { (uint8_t)(rgb >> 8), (uint8_t)(rgb & 0xFF) };
 
     HAL_SPI_Transmit(&g_lcd_spi, b, 2, HAL_MAX_DELAY);
+    lcd_spi_wait_idle();
 }
 
 static void lcd_gpio_rst_dc_cs_init(void)
@@ -75,6 +147,7 @@ static void lcd_spi_pins_init(void)
     GPIO_InitTypeDef gpio_init_struct;
 
     LCD_SPI_SCK_GPIO_CLK_ENABLE();
+    LCD_SPI_MISO_GPIO_CLK_ENABLE();
 
     gpio_init_struct.Pin = LCD_SPI_SCK_GPIO_PIN | LCD_SPI_MISO_GPIO_PIN | LCD_SPI_MOSI_GPIO_PIN;
     gpio_init_struct.Mode = GPIO_MODE_AF_PP;
@@ -84,8 +157,30 @@ static void lcd_spi_pins_init(void)
     HAL_GPIO_Init(GPIOA, &gpio_init_struct);
 }
 
+static uint32_t lcd_spi_prescaler_to_hal(uint32_t div)
+{
+    switch (div) {
+    case 2u:   return SPI_BAUDRATEPRESCALER_2;
+    case 4u:   return SPI_BAUDRATEPRESCALER_4;
+    case 8u:   return SPI_BAUDRATEPRESCALER_8;
+    case 16u:  return SPI_BAUDRATEPRESCALER_16;
+    case 32u:  return SPI_BAUDRATEPRESCALER_32;
+    case 64u:  return SPI_BAUDRATEPRESCALER_64;
+    case 256u: return SPI_BAUDRATEPRESCALER_256;
+    case 128u:
+    default:   return SPI_BAUDRATEPRESCALER_128;
+    }
+}
+
+static uint32_t lcd_spi_effective_prescaler(void)
+{
+    return (uint32_t)APP_LCD_SPI_PRESCALER;
+}
+
 static void lcd_spi_periph_init(void)
 {
+    uint32_t div = lcd_spi_effective_prescaler();
+
     g_lcd_spi.Instance = LCD_SPI;
     g_lcd_spi.Init.Mode = SPI_MODE_MASTER;
     g_lcd_spi.Init.Direction = SPI_DIRECTION_2LINES;
@@ -93,12 +188,24 @@ static void lcd_spi_periph_init(void)
     g_lcd_spi.Init.CLKPolarity = SPI_POLARITY_LOW;
     g_lcd_spi.Init.CLKPhase = SPI_PHASE_1EDGE;
     g_lcd_spi.Init.NSS = SPI_NSS_SOFT;
-    g_lcd_spi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+    g_lcd_spi.Init.BaudRatePrescaler = lcd_spi_prescaler_to_hal(div);
     g_lcd_spi.Init.FirstBit = SPI_FIRSTBIT_MSB;
     g_lcd_spi.Init.TIMode = SPI_TIMODE_DISABLE;
     g_lcd_spi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
     g_lcd_spi.Init.CRCPolynomial = 7;
     HAL_SPI_Init(&g_lcd_spi);
+
+#if (APP_BOOT_STAGE_LOG != 0)
+    {
+        char buf[80];
+        uint32_t pclk2 = HAL_RCC_GetPCLK2Freq();
+        uint32_t sck_hz = (div != 0u) ? (pclk2 / div) : 0u;
+        snprintf(buf, sizeof(buf),
+                 "[LCD] SPI1 prescaler=/%lu PCLK2=%luHz SCK~%luHz\r\n",
+                 (unsigned long)div, (unsigned long)pclk2, (unsigned long)sck_hz);
+        usart_debug_tx_str(buf);
+    }
+#endif
 }
 
 static void lcd_hard_reset(void)
@@ -119,13 +226,20 @@ static void lcd_read_id_spi(void)
     HAL_SPI_Transmit(&g_lcd_spi, &cmd, 1, HAL_MAX_DELAY);
     lcd_dc_data();
     HAL_SPI_Receive(&g_lcd_spi, rb, 4, HAL_MAX_DELAY);
+    lcd_spi_wait_idle();
     lcd_cs_high();
 
     lcddev.id = ((uint16_t)rb[2] << 8) | rb[3];
-    if (lcddev.id != 0x9341)
+#if (APP_BOOT_STAGE_LOG != 0)
     {
-        lcddev.id = 0x9341;
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "[LCD] read_id D3 raw %02X %02X %02X %02X -> 0x%04X (force ILI9341)\r\n",
+                 rb[0], rb[1], rb[2], rb[3], (unsigned)lcddev.id);
+        usart_debug_tx_str(buf);
     }
+#endif
+    lcddev.id = 0x9341u;
 }
 
 /**
@@ -140,7 +254,8 @@ void lcd_wr_data(volatile uint16_t data)
     lcd_cs_low();
     lcd_dc_data();
     HAL_SPI_Transmit(&g_lcd_spi, &d, 1, HAL_MAX_DELAY);
-    lcd_cs_high();
+    lcd_spi_wait_idle();
+    lcd_cs_release();
 }
 
 /**
@@ -155,7 +270,8 @@ void lcd_wr_regno(volatile uint16_t regno)
     lcd_cs_low();
     lcd_dc_cmd();
     HAL_SPI_Transmit(&g_lcd_spi, &r, 1, HAL_MAX_DELAY);
-    lcd_cs_high();
+    lcd_spi_wait_idle();
+    lcd_cs_release();
 }
 
 /**
@@ -174,7 +290,8 @@ void lcd_write_reg(uint16_t regno, uint16_t data)
     HAL_SPI_Transmit(&g_lcd_spi, &r, 1, HAL_MAX_DELAY);
     lcd_dc_data();
     HAL_SPI_Transmit(&g_lcd_spi, &d, 1, HAL_MAX_DELAY);
-    lcd_cs_high();
+    lcd_spi_wait_idle();
+    lcd_cs_release();
 }
 
 /**
@@ -218,7 +335,7 @@ void lcd_write_ram_prepare(void)
 
 static void lcd_write_ram_end(void)
 {
-    lcd_cs_high();
+    lcd_cs_release();
 }
 
 /**
@@ -461,19 +578,78 @@ void lcd_set_window(uint16_t sx, uint16_t sy, uint16_t width, uint16_t height)
  */
 void lcd_init(void)
 {
+    bsp_w25q16_end_session();
+
     lcd_gpio_rst_dc_cs_init();
     lcd_spi_pins_init();
     LCD_SPI_CLK_ENABLE();
     lcd_spi_periph_init();
+    lcd_boot_diag_log("after_spi_init");
     lcd_hard_reset();
     lcd_read_id_spi();
+    lcd_boot_diag_log("after_read_id");
 
+#if (APP_LCD_FORCE_ST7789 != 0)
+    lcd_ex_st7789_reginit();
+#if (APP_BOOT_STAGE_LOG != 0)
+    usart_debug_tx_str("[LCD] panel init: ST7789 (forced)\r\n");
+#endif
+#elif (APP_LCD_ID_UNKNOWN_USE_ST7789 != 0)
+    lcd_ex_st7789_reginit();
+#if (APP_BOOT_STAGE_LOG != 0)
+    usart_debug_tx_str("[LCD] panel init: ST7789\r\n");
+#endif
+#else
     lcd_ex_ili9341_reginit();
+#if (APP_BOOT_STAGE_LOG != 0)
+    usart_debug_tx_str("[LCD] panel init: ILI9341\r\n");
+#endif
+#endif
 
     lcd_display_dir(0);
+
     LCD_BL(1);
+#if (APP_LCD_HW_TEST == 0) && (APP_LCD_SKIP_BOOT_CLEAR == 0)
     lcd_clear(WHITE);
+#endif
+    lcd_boot_diag_log("after_clear");
 }
+
+#if (APP_LCD_HW_TEST != 0)
+void lcd_panel_hw_selftest(void)
+{
+    uint16_t w = lcddev.width;
+    uint16_t h = lcddev.height;
+
+    if (w == 0u || h == 0u)
+    {
+        w = 240u;
+        h = 320u;
+    }
+
+    usart_debug_tx_str("[LCD] HW test BLACK full screen 3s\r\n");
+    lcd_fill(0u, 0u, (uint16_t)(w - 1u), (uint16_t)(h - 1u), BLACK);
+    delay_ms(3000);
+
+    usart_debug_tx_str("[LCD] HW test RED full screen 3s\r\n");
+    lcd_fill(0u, 0u, (uint16_t)(w - 1u), (uint16_t)(h - 1u), RED);
+    delay_ms(3000);
+
+    usart_debug_tx_str("[LCD] HW test GREEN full screen 3s\r\n");
+    lcd_fill(0u, 0u, (uint16_t)(w - 1u), (uint16_t)(h - 1u), GREEN);
+    delay_ms(3000);
+
+    usart_debug_tx_str("[LCD] HW test BLUE full screen 3s\r\n");
+    lcd_fill(0u, 0u, (uint16_t)(w - 1u), (uint16_t)(h - 1u), BLUE);
+    delay_ms(3000);
+
+    usart_debug_tx_str("[LCD] HW test done -> LVGL\r\n");
+}
+#else
+void lcd_panel_hw_selftest(void)
+{
+}
+#endif
 
 /**
  * @brief       ????????
@@ -482,73 +658,70 @@ void lcd_init(void)
  */
 void lcd_clear(uint16_t color)
 {
-    uint32_t index = 0;
-    uint32_t totalpoint = (uint32_t)lcddev.width * (uint32_t)lcddev.height;
-
-    lcd_set_cursor(0, 0);
-    lcd_write_ram_prepare();
-
-    for (index = 0; index < totalpoint; index++)
-    {
-        lcd_wr_pixel565(color);
-    }
-
-    lcd_write_ram_end();
+    lcd_fill(0u, 0u, (uint16_t)(lcddev.width - 1u), (uint16_t)(lcddev.height - 1u), color);
 }
 
-/**
- * @brief       ???????????????????
- * @param       (sx,sy),(ex,ey):?????????????,????????:(ex - sx + 1) * (ey - sy + 1)
- * @param       color:  ????????(32?????,???????LTDC)
- * @retval      ??
- */
 void lcd_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint32_t color)
 {
-    uint16_t i, j;
-    uint16_t xlen = (uint16_t)(ex - sx + 1);
+    uint16_t i;
+    uint16_t xlen = (uint16_t)(ex - sx + 1u);
     uint16_t c = (uint16_t)color;
+    static uint8_t s_row[240u * 2u];
+    uint32_t j;
+    uint8_t hi = (uint8_t)(c >> 8);
+    uint8_t lo = (uint8_t)(c & 0xFFu);
 
-    for (i = sy; i <= ey; i++)
-    {
+    if(xlen > 240u) {
+        return;
+    }
+    for(j = 0u; j < xlen; j++) {
+        s_row[j * 2u] = hi;
+        s_row[j * 2u + 1u] = lo;
+    }
+
+    for(i = sy; i <= ey; i++) {
+        lcd_spi_cs_hold_begin();
         lcd_set_cursor(sx, i);
         lcd_write_ram_prepare();
-
-        for (j = 0; j < xlen; j++)
-        {
-            lcd_wr_pixel565(c);
-        }
-
+        HAL_SPI_Transmit(&g_lcd_spi, s_row, (uint16_t)(xlen * 2u), HAL_MAX_DELAY);
+        lcd_spi_wait_idle();
         lcd_write_ram_end();
+        lcd_spi_cs_hold_end();
     }
 }
 
-/**
- * @brief       ??????????????????????
- * @param       (sx,sy),(ex,ey):?????????????,????????:(ex - sx + 1) * (ey - sy + 1)
- * @param       color: ????????????????
- * @retval      ??
- */
 void lcd_color_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t *color)
 {
-    uint32_t width;
-    uint32_t height;
-    uint32_t total;
-    uint32_t i;
+    uint16_t height;
+    uint16_t width;
+    uint16_t i;
+    uint16_t j;
+    static uint8_t s_row[240u * 2u];
 
     if(color == NULL) {
         return;
     }
-    width = (uint32_t)(ex - sx + 1u);
-    height = (uint32_t)(ey - sy + 1u);
-    total = width * height;
 
-    /* 一次开窗连续写 RAM，比逐行 set_cursor 快很多（LVGL 局部刷新关键路径） */
-    lcd_set_window(sx, sy, (uint16_t)width, (uint16_t)height);
-    lcd_write_ram_prepare();
-    for(i = 0u; i < total; i++) {
-        lcd_wr_pixel565(color[i]);
+    width = (uint16_t)(ex - sx + 1u);
+    height = (uint16_t)(ey - sy + 1u);
+    if(width > 240u) {
+        return;
     }
-    lcd_write_ram_end();
+
+    for(i = 0u; i < height; i++) {
+        for(j = 0u; j < width; j++) {
+            uint16_t pix = color[(uint32_t)i * width + j];
+            s_row[j * 2u] = (uint8_t)(pix >> 8);
+            s_row[j * 2u + 1u] = (uint8_t)(pix & 0xFFu);
+        }
+        lcd_spi_cs_hold_begin();
+        lcd_set_cursor(sx, (uint16_t)(sy + i));
+        lcd_write_ram_prepare();
+        HAL_SPI_Transmit(&g_lcd_spi, s_row, (uint16_t)(width * 2u), HAL_MAX_DELAY);
+        lcd_spi_wait_idle();
+        lcd_write_ram_end();
+        lcd_spi_cs_hold_end();
+    }
 }
 
 /**
@@ -908,8 +1081,8 @@ void lcd_show_string(uint16_t x, uint16_t y, uint16_t width, uint16_t height, ui
 
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi)
 {
-    if(hspi != NULL && hspi->Instance == SPI3) {
-        __HAL_RCC_SPI3_CLK_ENABLE();
+    if(hspi != NULL && hspi->Instance == SPI1) {
+        __HAL_RCC_SPI1_CLK_ENABLE();
     }
 }
 

@@ -40,8 +40,8 @@ typedef struct {
 #define RS485_UNLOCK_DEVICE_MASTER     1u
 #define RS485_UNLOCK_DEVICE_SLAVE      2u
 typedef struct {
-    uint8_t method_id;
-    uint8_t device_id;
+    uint8_t method_id; /* 1/2/3/5，与主机物模型一致 */
+    uint8_t device_id; /* RS485_UNLOCK_DEVICE_SLAVE = 2 */
     char    acc[12];
 } rs485_unlock_notify_t;
 #pragma pack(pop)

@@ -309,9 +309,10 @@ void app_fp_mirror_tx_tick(void)
     }
 
     /* 录入界面/过程中禁止 RS485 镜像：与 FpTask 抢主机 AS608，且会打断从机写模板 */
-    if(g_screen8_fp_enroll_state == 1u || g_app_scr == APP_SCR_10) {
+    if(g_screen8_fp_enroll_state == 1u || g_app_scr == APP_SCR_6 ||
+       g_app_scr == APP_SCR_8 || g_app_scr == APP_SCR_10) {
         if(s_fp_tx_state != FP_TX_IDLE || s_fp_wait_commit != 0u) {
-            FP_MIRROR_LOG("[HOST][FP] pause mirror (enroll on screen10)");
+            FP_MIRROR_LOG("[HOST][FP] pause mirror (enroll ui scr=%u)", (unsigned)g_app_scr);
             s_fp_wait_commit = 0u;
             s_fp_wait_commit_log_ms = 0u;
             s_fp_tx_state = FP_TX_IDLE;

@@ -1,10 +1,16 @@
 #include "app_home_unlock.h"
+#include "app_config.h"
+#if (APP_UI_V3_ENABLE == 1)
+#include "ui_v3/app_ui_v3_anim.h"
+#endif
 
 #include <stdio.h>
 #include <string.h>
 
 #include "lvgl.h"
+#if (APP_LEGACY_UI_ENABLE != 0)
 #include "gui_guider.h"
+#endif
 #include "app_screen.h"
 #include "app_unlock_event.h"
 #include "app_user_ops.h"
@@ -24,9 +30,13 @@
 #define APP_UNLOCK_LOG(fmt, ...) ((void)0)
 #endif
 
+#if (APP_UI_V3_ENABLE == 0)
 LV_FONT_DECLARE(lv_font_SourceHanSerifSC_Regular_20);
+#endif
 
+#if (APP_LEGACY_UI_ENABLE != 0)
 extern lv_ui guider_ui;
+#endif
 extern volatile app_scr_t g_app_scr;
 extern user_cred_t g_users[APP_USER_MAX];
 extern uint8_t g_default_admin_deleted;
@@ -65,6 +75,9 @@ static void app_home_unlock_popup_close(void)
     s_home_unlock_popup = NULL;
     s_home_unlock_popup_ms = 0u;
     s_home_unlock_visible = 0u;
+#if (APP_UI_V3_ENABLE == 1)
+    ui3_modal_release();
+#endif
 }
 
 static void app_home_unlock_timer_cb(lv_timer_t *t)
@@ -76,14 +89,34 @@ static void app_home_unlock_timer_cb(lv_timer_t *t)
 
 void app_home_show_unlock_popup(void)
 {
+    lv_obj_t *root;
+
+#if (APP_UI_V3_ENABLE == 1)
+    root = lv_scr_act();
+    if(root == NULL) {
+        return;
+    }
+    app_home_unlock_popup_close();
+    s_home_unlock_popup = ui3_show_unlock_welcome(root);
+    s_home_unlock_visible = 1u;
+    s_home_unlock_popup_ms = HAL_GetTick();
+    s_home_unlock_timer = lv_timer_create(app_home_unlock_timer_cb, APP_HOME_UNLOCK_POPUP_MS, NULL);
+    if(s_home_unlock_timer != NULL) {
+        lv_timer_set_repeat_count(s_home_unlock_timer, 1);
+    }
+#else
     lv_obj_t *mask;
     lv_obj_t *panel;
     lv_obj_t *lbl;
 
-    if(!lv_obj_is_valid(guider_ui.screen)) return;
+    if(!lv_obj_is_valid(guider_ui.screen)) {
+        return;
+    }
+    root = guider_ui.screen;
+
     app_home_unlock_popup_close();
 
-    mask = lv_obj_create(guider_ui.screen);
+    mask = lv_obj_create(root);
     s_home_unlock_popup = mask;
     s_home_unlock_visible = 1u;
     lv_obj_set_size(mask, 240, 320);
@@ -122,17 +155,32 @@ void app_home_show_unlock_popup(void)
     if(s_home_unlock_timer != NULL) {
         lv_timer_set_repeat_count(s_home_unlock_timer, 1);
     }
+#endif
 }
 
 void app_home_unlock_housekeeping(void)
 {
-    if(s_home_unlock_popup == NULL || !lv_obj_is_valid(s_home_unlock_popup)) return;
+    if(s_home_unlock_visible != 0u &&
+       (s_home_unlock_popup == NULL || !lv_obj_is_valid(s_home_unlock_popup))) {
+        app_home_unlock_popup_close();
+        return;
+    }
+    if(s_home_unlock_popup == NULL || !lv_obj_is_valid(s_home_unlock_popup)) {
+        return;
+    }
 
     /* Failsafe: if timer creation/execution is delayed, force close popup. */
+#if (APP_UI_V3_ENABLE == 1)
+    if(lv_scr_act() == NULL) {
+        app_home_unlock_popup_close();
+        return;
+    }
+#else
     if(g_app_scr != APP_SCR_HOME || lv_scr_act() != guider_ui.screen) {
         app_home_unlock_popup_close();
         return;
     }
+#endif
     if(s_home_unlock_popup_ms != 0u && (HAL_GetTick() - s_home_unlock_popup_ms) > (APP_HOME_UNLOCK_POPUP_MS + 1000u)) {
         app_home_unlock_popup_close();
     }

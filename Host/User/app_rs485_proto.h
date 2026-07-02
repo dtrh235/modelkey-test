@@ -24,7 +24,8 @@
  * 从机→主机:
  *   0x04 MIRROR_SYNC_REQ payload 空 — 请主机尽快下发全量用户（账号/密码/NFC/指纹）
  *   0x10 SLAVE_UNLOCK_NOTIFY payload 15 字节 rs485_unlock_notify_t:
- *        method_id(1=pwd,2=nfc,3=fp) + device_id(1=主机,2=从机) + acc[12]
+ *        method_id 与物模型 unlock_method 一致：1密码 2NFC 3指纹 5临时密码（无从机 4 远程）
+ *        device_id 固定 2（侧门从机）；acc[12] 为账号（临时密码主机侧上报 temporary account）
  * 应答 cmd = 请求 | 0x80, len=0 表示成功；len=1 payload[0]=错误码 表示失败
  */
 

@@ -54,7 +54,7 @@ void cloud_uart2_set_ui_busy(uint8_t busy);
 void cloud_uart2_drain_hw(uint32_t ms);
 /* 连接/CWJAP 前：等待 CWLAP 尾包吐完 */
 void cloud_uart2_wait_scan_tail_quiet(uint32_t quiet_ms);
-/* PA8 拉低复位 ESP8266，等待 boot_ms 后排空 UART RX */
+/* 拉低脉冲硬复位：WF24=PE12(KEY) / ESP8266=PA8(RST)，等待 boot_ms 后排空 UART RX */
 void cloud_uart2_esp_hw_reset(uint32_t boot_ms);
 /* 非阻塞复位：GuiTask 每帧 poll，避免 HAL_Delay 卡死触摸 */
 uint8_t cloud_uart2_esp_hw_reset_begin(uint32_t boot_ms);
@@ -64,6 +64,7 @@ void cloud_uart2_prepare_for_cwlap_only(void);
 uint8_t cloud_uart2_modem_ready(void);
 /* 发 AT 探测模组；成功则置 modem_ready（WiFi 页暂停 cloud poll 时仍可握手） */
 uint8_t cloud_uart2_try_modem_ready(void);
+uint8_t cloud_uart2_try_modem_ready_timeout(uint32_t wait_ms);
 /* WiFi 页发 AT 前：排空 RX、固定 115200，MQTT 在线时先 CIPCLOSE */
 void cloud_uart2_prepare_for_ui_at(void);
 void cloud_uart2_copy_rx_win(char *dst, uint16_t dst_sz);

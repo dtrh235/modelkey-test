@@ -22,12 +22,12 @@
 #endif
 
 /*
- * Winbond W25Q16 — 软件模拟 SPI（Mode0），PA15=CS PB3=SCK PB5=MOSI PB4=MISO
- * 与 Client 工程相同实现，便于跨板对比硬件/软件。
+ * Winbond W25Q16 — 软件模拟 SPI（Mode0），PE0=CS PB3=SCK PB5=MOSI PB4=MISO
+ * 网表 PCB4_5: F_CS -> U27.97(PE0)；PB3/4/5 与 JTAG 复用，Debug 选 SW。
  */
 
-#define W25Q_CS_PORT  GPIOA
-#define W25Q_CS_PIN   GPIO_PIN_15
+#define W25Q_CS_PORT  GPIOE
+#define W25Q_CS_PIN   GPIO_PIN_0
 #define W25Q_SCK_PORT GPIOB
 #define W25Q_SCK_PIN  GPIO_PIN_3
 #define W25Q_MISO_PORT GPIOB
@@ -44,11 +44,17 @@
 
 #define W25Q_BUSY_WAIT_MS 5000u
 
+#ifndef W25Q_SOFT_SPI_DELAY_US
+#define W25Q_SOFT_SPI_DELAY_US  2u
+#endif
+
 static uint8_t s_w25q_ready;
 
 static void w25q_delay_pins(void)
 {
-    delay_us(2u);
+    if(W25Q_SOFT_SPI_DELAY_US != 0u) {
+        delay_us(W25Q_SOFT_SPI_DELAY_US);
+    }
 }
 
 static uint8_t w25q_soft_xfer_byte(uint8_t tx)
@@ -173,11 +179,21 @@ static void w25q_read_jedec_raw(uint8_t id[3])
     w25q_cs_high();
 }
 
+static void w25q_release_jtag_pins(void)
+{
+    /*
+     * PB3/PB4 与 JTAG 复用。Keil Debug 须选 SW（勿选 JTAG），
+     * 否则 PB3/PB4 可能无法作为 GPIO 驱动 W25Q。
+     */
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
+}
+
 static void w25q_gpio_soft_spi_setup(void)
 {
     GPIO_InitTypeDef gpio = {0};
 
-    __HAL_RCC_GPIOA_CLK_ENABLE();
+    w25q_release_jtag_pins();
+    __HAL_RCC_GPIOE_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
     HAL_GPIO_WritePin(W25Q_CS_PORT, W25Q_CS_PIN, GPIO_PIN_SET);
@@ -201,7 +217,7 @@ static void w25q_gpio_soft_spi_setup(void)
     gpio.Pin = W25Q_MISO_PIN;
     HAL_GPIO_Init(W25Q_MISO_PORT, &gpio);
 
-    W25Q_LOG("soft-SPI PA15=CS PB3/4/5");
+    W25Q_LOG("soft-SPI PE0=CS PB3/4/5");
 }
 
 bool bsp_w25q16_read(uint32_t addr, uint8_t *buf, size_t len)
@@ -324,6 +340,50 @@ uint32_t bsp_w25q16_probe_jedec_id(void)
     id = bsp_w25q16_read_jedec_id();
     bsp_w25q16_end_session();
     return id;
+}
+
+void bsp_w25q16_hw_diag(bsp_w25q16_hw_diag_t *out)
+{
+    if(out == NULL) {
+        return;
+    }
+
+    memset(out, 0, sizeof(*out));
+    bsp_w25q16_end_session();
+    w25q_gpio_soft_spi_setup();
+
+    out->miso_idle = (HAL_GPIO_ReadPin(W25Q_MISO_PORT, W25Q_MISO_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+    out->cs_level = (HAL_GPIO_ReadPin(W25Q_CS_PORT, W25Q_CS_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+    out->sck_level = (HAL_GPIO_ReadPin(W25Q_SCK_PORT, W25Q_SCK_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+
+    HAL_GPIO_WritePin(W25Q_SCK_PORT, W25Q_SCK_PIN, GPIO_PIN_RESET);
+    delay_us(5u);
+    out->sck_lo = (HAL_GPIO_ReadPin(W25Q_SCK_PORT, W25Q_SCK_PIN) == GPIO_PIN_RESET) ? 1u : 0u;
+    HAL_GPIO_WritePin(W25Q_SCK_PORT, W25Q_SCK_PIN, GPIO_PIN_SET);
+    delay_us(5u);
+    out->sck_hi = (HAL_GPIO_ReadPin(W25Q_SCK_PORT, W25Q_SCK_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+    HAL_GPIO_WritePin(W25Q_SCK_PORT, W25Q_SCK_PIN, GPIO_PIN_RESET);
+
+    HAL_GPIO_WritePin(W25Q_MOSI_PORT, W25Q_MOSI_PIN, GPIO_PIN_RESET);
+    delay_us(5u);
+    out->mosi_lo = (HAL_GPIO_ReadPin(W25Q_MOSI_PORT, W25Q_MOSI_PIN) == GPIO_PIN_RESET) ? 1u : 0u;
+    HAL_GPIO_WritePin(W25Q_MOSI_PORT, W25Q_MOSI_PIN, GPIO_PIN_SET);
+    delay_us(5u);
+    out->mosi_hi = (HAL_GPIO_ReadPin(W25Q_MOSI_PORT, W25Q_MOSI_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+    HAL_GPIO_WritePin(W25Q_MOSI_PORT, W25Q_MOSI_PIN, GPIO_PIN_RESET);
+
+    HAL_GPIO_WritePin(W25Q_CS_PORT, W25Q_CS_PIN, GPIO_PIN_RESET);
+    delay_us(5u);
+    out->cs_lo = (HAL_GPIO_ReadPin(W25Q_CS_PORT, W25Q_CS_PIN) == GPIO_PIN_RESET) ? 1u : 0u;
+    HAL_GPIO_WritePin(W25Q_CS_PORT, W25Q_CS_PIN, GPIO_PIN_SET);
+    delay_us(5u);
+    out->cs_hi = (HAL_GPIO_ReadPin(W25Q_CS_PORT, W25Q_CS_PIN) == GPIO_PIN_SET) ? 1u : 0u;
+
+    w25q_read_jedec_raw(out->jedec1);
+    delay_us(50u);
+    w25q_read_jedec_raw(out->jedec2);
+
+    w25q_gpio_deinit_lines();
 }
 
 bool bsp_w25q16_init(void)

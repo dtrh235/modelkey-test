@@ -17,6 +17,17 @@ uint8_t ct_iic_rd_reg_trace(uint8_t dev_wr, uint8_t dev_rd, uint8_t reg, uint8_t
 uint8_t ct_iic_pin_read_sda(void);
 uint8_t ct_iic_pin_read_scl(void);
 
+typedef struct {
+    uint8_t scl_low;   /* 1: open-drain low, pin reads 0 */
+    uint8_t scl_high;  /* 1: release, pin reads 1 */
+    uint8_t sda_low;
+    uint8_t sda_high;
+} ct_iic_gpio_test_t;
+
+void ct_iic_gpio_line_test(ct_iic_gpio_test_t *out);
+/* Scan 7-bit addr 0x01..0x7F; returns count; addr_wr[] holds 8-bit write addr */
+uint8_t ct_iic_bus_scan(uint8_t *addr_wr, uint8_t max, uint8_t *found);
+
 void ct_iic_init(void);
 void ct_iic_stop(void);
 void ct_iic_start(void);

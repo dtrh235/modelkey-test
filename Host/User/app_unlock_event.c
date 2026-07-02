@@ -2,12 +2,15 @@
 
 #include <string.h>
 
+#include "app_board_gpio.h"
 #include "app_home_unlock.h"
-#include "app_screen1_unlock.h"
 #include "app_unlock_uart4.h"
 #include "cloud_ota_service.h"
 #include "app_config.h"
 #include "app_host_diag.h"
+#if (APP_LEGACY_UI_ENABLE != 0)
+#include "app_screen1_unlock.h"
+#endif
 #include "./SYSTEM/sys/sys.h"
 
 #if (APP_USE_FREERTOS == 1)
@@ -56,6 +59,7 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
     NAV_LOG("[UNLOCK] queued popup=%u acc=%s by=%s\r\n",
             (unsigned)popup_type, s_unlock_popup_account, s_unlock_popup_method);
 #endif
+    board_relay_unlock_pulse();
     app_unlock_uart4_on_unlock_ok(account, method);
     cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, account);
     if(strcmp(method, "remote") == 0) {
@@ -79,7 +83,11 @@ void app_unlock_event_gui_pump(void)
     if(s_unlock_popup_type == (uint8_t)APP_UNLOCK_POPUP_HOME) {
         app_home_show_unlock_popup();
     } else {
+#if (APP_LEGACY_UI_ENABLE != 0)
         screen1_show_unlock_popup();
+#else
+        app_home_show_unlock_popup();
+#endif
     }
 #if (APP_HOST_NAV_DIAG != 0)
     NAV_LOG("[UNLOCK] popup=%u acc=%s by=%s\r\n",

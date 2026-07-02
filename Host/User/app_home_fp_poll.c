@@ -4,7 +4,9 @@
 #include <stdio.h>
 
 #include "lvgl.h"
+#if (APP_LEGACY_UI_ENABLE != 0)
 #include "gui_guider.h"
+#endif
 #include "app_screen.h"
 #include "app_unlock_event.h"
 #include "app_user_ops.h"
@@ -23,7 +25,9 @@
 #include "app_rs485_fp_sync.h"
 #endif
 
+#if (APP_LEGACY_UI_ENABLE != 0)
 extern lv_ui guider_ui;
+#endif
 extern volatile app_scr_t g_app_scr;
 extern uint8_t g_screen8_fp_enroll_state;
 
@@ -165,7 +169,8 @@ void app_home_fp_poll_handle(uint32_t *home_fp_last_poll_ms, uint8_t *fp_hw_init
 
     if(g_app_scr != APP_SCR_HOME) return;
 #if (APP_RS485_ENABLE == 1) && APP_RS485_IS_MASTER
-    if(g_screen8_fp_enroll_state == 1u || g_app_scr == APP_SCR_10) {
+    if(g_screen8_fp_enroll_state == 1u || g_app_scr == APP_SCR_6 ||
+       g_app_scr == APP_SCR_8 || g_app_scr == APP_SCR_10) {
         return;
     }
 #endif

@@ -14,6 +14,28 @@
 #include "app_wifi_diag.h"
 #include "stm32f4xx_hal.h"
 
+#if (APP_UI_V3_ENABLE == 1)
+#include "ui_v3/app_ui_v3_services.h"
+#endif
+
+static uint8_t remember_on_wifi_page(void)
+{
+    return (g_app_scr == APP_SCR_11 || app_wifi_scan_ui_active() != 0u) ? 1u : 0u;
+}
+
+static uint8_t remember_wifi_popup_active(void)
+{
+    if(screen_wifi_popup_is_active() != 0u) {
+        return 1u;
+    }
+#if (APP_UI_V3_ENABLE == 1)
+    if(ui3_wifi_modal_active() != 0u) {
+        return 1u;
+    }
+#endif
+    return 0u;
+}
+
 #define WIFI_REMEMBER_FLASH_ADDR  ((uint32_t)0x00012000u)
 #define WIFI_REMEMBER_MAGIC       (0x33575246u) /* WR3F */
 #define WIFI_REMEMBER_VERSION     (1u)
@@ -354,7 +376,7 @@ static void auto_batch_try_resume(void)
     if(s_scr11_auto_done != 0u || s_manual_lock != 0u) {
         return;
     }
-    if(screen_wifi_popup_is_active()) {
+    if(remember_wifi_popup_active() != 0u) {
         return;
     }
     if(remember_wifi_already_connected() != 0u) {
@@ -567,7 +589,7 @@ void app_wifi_remember_on_scan_done(void)
 #if (APP_WIFI_AUTO_CONNECT_ENABLE == 0)
     return;
 #else
-    if(g_app_scr != APP_SCR_11) {
+    if(remember_on_wifi_page() == 0u) {
         return;
     }
     if(s_scr11_auto_done != 0u) {
@@ -586,7 +608,7 @@ void app_wifi_remember_on_scan_done(void)
         REMEMBER_DBG("scan done: skip auto (batch in progress)");
         return;
     }
-    if(screen_wifi_popup_is_active()) {
+    if(remember_wifi_popup_active() != 0u) {
         REMEMBER_DBG("scan done: skip auto (password popup open)");
         return;
     }
@@ -635,7 +657,7 @@ uint8_t app_wifi_remember_scr11_poll(void)
 {
     uint8_t conn_r;
 
-    if(g_app_scr != APP_SCR_11) {
+    if(remember_on_wifi_page() == 0u) {
         return 0u;
     }
 
