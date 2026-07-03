@@ -31,8 +31,9 @@ static int s_defer_unlock_device;
 #define CLOUD_PROP_RETRY_SLOTS  8u
 #define CLOUD_PROP_RETRY_BYTES  400u
 #define CLOUD_PROP_INLINE_TRIES 1u
-#define CLOUD_PROP_RETRY_MIN_MS 1500u
-#define CLOUD_PROP_POST_AWAIT_MS  1500u
+#define CLOUD_PROP_RETRY_MIN_MS 2000u
+#define CLOUD_PROP_POST_AWAIT_MS  3000u
+#define CLOUD_PROP_BRIDGE_GAP_MS  180u
 
 static char s_prop_retry[CLOUD_PROP_RETRY_SLOTS][CLOUD_PROP_RETRY_BYTES];
 static uint8_t s_prop_retry_cnt;
@@ -41,6 +42,37 @@ static uint32_t s_prop_flush_earliest_ms;
 static uint32_t s_prop_last_confirmed_seq;
 static uint32_t s_prop_last_confirmed_ms;
 static char s_unlock_guest_acc[13];
+
+#if (APP_USE_FREERTOS == 1)
+#include "FreeRTOS.h"
+#include "task.h"
+static TaskHandle_t s_cloud_task_hdl;
+#endif
+
+static void cloud_json_copy_account(const char *src, char *dst, size_t dst_sz)
+{
+    size_t i = 0u;
+
+    if(dst_sz == 0u) {
+        return;
+    }
+    if(src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    while(src[i] != '\0' && i < (dst_sz - 1u)) {
+        unsigned char c = (unsigned char)src[i];
+        if(c == '"' || c == '\\') {
+            dst[i] = '_';
+        } else if(c < 0x20u || c > 0x7Eu) {
+            dst[i] = '?';
+        } else {
+            dst[i] = (char)c;
+        }
+        i++;
+    }
+    dst[i] = '\0';
+}
 
 static uint32_t cloud_prop_seq_from_payload(const char *payload)
 {
@@ -155,8 +187,36 @@ static uint8_t cloud_prop_retry_enqueue(const char *payload)
     slot = s_prop_retry_cnt;
     (void)snprintf(s_prop_retry[slot], CLOUD_PROP_RETRY_BYTES, "%s", payload);
     s_prop_retry_cnt++;
-    s_prop_flush_earliest_ms = HAL_GetTick() + 400u;
+    s_prop_flush_earliest_ms = HAL_GetTick();
     return 1u;
+}
+
+void cloud_ota_service_bind_cloud_task(void *task_handle)
+{
+#if (APP_USE_FREERTOS == 1)
+    s_cloud_task_hdl = (TaskHandle_t)task_handle;
+#else
+    (void)task_handle;
+#endif
+}
+
+static void cloud_ota_kick_cloud_task(void)
+{
+#if (APP_USE_FREERTOS == 1)
+    if(s_cloud_task_hdl != NULL) {
+        (void)xTaskNotifyGive(s_cloud_task_hdl);
+    }
+#endif
+}
+
+static void cloud_unlock_bridge_gap(void)
+{
+    uint32_t t0 = HAL_GetTick();
+
+    cloud_aliyun_at_pump_mqtt_ctrl();
+    while((HAL_GetTick() - t0) < CLOUD_PROP_BRIDGE_GAP_MS) {
+        cloud_aliyun_at_pump_mqtt_ctrl();
+    }
 }
 
 static uint8_t cloud_unlock_publish_property_resilient(const char *payload)
@@ -181,11 +241,7 @@ static uint8_t cloud_unlock_publish_property_resilient(const char *payload)
         await_r = cloud_aliyun_at_property_post_await(CLOUD_PROP_POST_AWAIT_MS);
         if(await_r == 1u) {
             cloud_prop_confirmed_from_payload(payload);
-            return 1u;
-        }
-        if(await_r == 2u) {
-            /* SEND 成功但未收到 post_reply：不再重复发，避免阿里云双份 */
-            cloud_prop_confirmed_from_payload(payload);
+            LOG_ESSENTIAL("[UNLOCK] cloud ok\r\n");
             return 1u;
         }
         cloud_aliyun_at_pump_mqtt_ctrl();
@@ -281,45 +337,28 @@ static uint8_t cloud_unlock_publish_terminal_bridge(const char *account, uint8_t
     return (cloud_aliyun_at_mqtt_publish_qos0(topic, json) != 0u) ? 1u : 0u;
 }
 
-/** 开锁热路径：仅同步发 App 桥接，物模型入后台重试队列，不阻塞 GUI */
-static uint8_t cloud_unlock_publish_live_fast(const char *account, uint8_t method_code,
-                                              uint8_t device_code, const char *time_txt,
-                                              uint32_t seq)
-{
-    char payload[400];
-    uint8_t bridge_ok;
-
-    (void)snprintf(payload, sizeof(payload),
-                   "{\"method\":\"thing.event.property.post\",\"id\":%lu,"
-                   "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%s\","
-                   "\"unlock_method\":%u,\"unlock_device\":%u},\"version\":\"1.0\"}",
-                   (unsigned long)seq, account, time_txt,
-                   (unsigned)method_code, (unsigned)device_code);
-    bridge_ok = cloud_unlock_publish_terminal_bridge(account, method_code, device_code,
-                                                     time_txt, seq);
-    /* 物模型延后到 poll 发，避免与 terminal/push 连续 CIPSEND 导致 MQTT 掉线 */
-    (void)cloud_prop_retry_enqueue(payload);
-    return bridge_ok;
-}
-
+/** 对齐 GitHub：桥接 + 物模型同步发（WF24 中间短间隔） */
 static uint8_t cloud_unlock_publish_all(const char *account, uint8_t method_code,
                                         uint8_t device_code, const char *time_txt,
                                         uint32_t seq)
 {
     char payload[400];
+    char safe_acc[24];
     uint8_t bridge_ok;
     uint8_t prop_ok;
 
+    cloud_json_copy_account(account, safe_acc, sizeof(safe_acc));
     (void)snprintf(payload, sizeof(payload),
                    "{\"method\":\"thing.event.property.post\",\"id\":%lu,"
                    "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%s\","
                    "\"unlock_method\":%u,\"unlock_device\":%u},\"version\":\"1.0\"}",
-                   (unsigned long)seq, account, time_txt,
+                   (unsigned long)seq, safe_acc, time_txt,
                    (unsigned)method_code, (unsigned)device_code);
-    bridge_ok = cloud_unlock_publish_terminal_bridge(account, method_code, device_code,
+    bridge_ok = cloud_unlock_publish_terminal_bridge(safe_acc, method_code, device_code,
                                                      time_txt, seq);
+    cloud_unlock_bridge_gap();
     prop_ok = cloud_unlock_publish_property_resilient(payload);
-    return (bridge_ok != 0u || prop_ok != 0u) ? 1u : 0u;
+    return (prop_ok != 0u) ? 1u : (bridge_ok != 0u ? 1u : 0u);
 }
 
 static int cloud_unlock_drain_cb(const char *json, void *ctx)
@@ -361,6 +400,7 @@ static int cloud_unlock_drain_cb(const char *json, void *ctx)
         bridge_ok = cloud_unlock_publish_terminal_bridge(account, (uint8_t)method_code,
                                                          (uint8_t)device_code, time_txt,
                                                          (uint32_t)seq);
+        cloud_unlock_bridge_gap();
     }
     prop_ok = cloud_unlock_publish_property_resilient(json);
     if(prop_ok != 0u) {
@@ -376,7 +416,13 @@ int cloud_ota_service_publish_flash_json(const char *json)
 
 static uint8_t cloud_unlock_time_ready(void)
 {
-    return (cloud_aliyun_at_time_is_synced() != 0u && app_wall_clock_valid() != 0u) ? 1u : 0u;
+    uint32_t epoch;
+
+    if(cloud_aliyun_at_time_is_synced() == 0u || app_wall_clock_valid() == 0u) {
+        return 0u;
+    }
+    epoch = app_wall_clock_epoch_sec();
+    return (epoch >= 1600000000u) ? 1u : 0u;
 }
 
 void cloud_ota_service_init(void)
@@ -392,8 +438,13 @@ void cloud_ota_service_init(void)
 
 void cloud_ota_service_flush_unlock_pending(void)
 {
-    uint16_t n;
     static uint32_t s_flush_skip_no_time_log_ms;
+    static uint8_t s_flush_busy;
+
+    if(s_flush_busy != 0u) {
+        return;
+    }
+    s_flush_busy = 1u;
 
     if(cloud_unlock_time_ready() == 0u) {
         uint32_t tnow = HAL_GetTick();
@@ -402,17 +453,20 @@ void cloud_ota_service_flush_unlock_pending(void)
             s_flush_skip_no_time_log_ms = tnow;
             UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] flush skip no time\r\n");
         }
+        s_flush_busy = 0u;
         return;
     }
     s_flush_skip_no_time_log_ms = 0u;
     if(cloud_aliyun_at_is_online() == 0u) {
         UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] flush skip offline\r\n");
+        s_flush_busy = 0u;
         return;
     }
 #if (APP_WIFI_UI_SCAN_ENABLE == 1)
     if(app_wifi_connect_busy() != 0u || app_wifi_scan_busy() != 0u ||
        app_wifi_scan_has_pending() != 0u) {
         UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] flush skip uart busy\r\n");
+        s_flush_busy = 0u;
         return;
     }
 #endif
@@ -422,8 +476,7 @@ void cloud_ota_service_flush_unlock_pending(void)
         (void)app_unlock_flash_upload_next_property(cloud_ota_service_publish_flash_property_only,
                                                     NULL);
     }
-    n = app_unlock_flash_count();
-    (void)n;
+    s_flush_busy = 0u;
 }
 
 void cloud_ota_service_tick_1ms(void)
@@ -450,6 +503,11 @@ static void cloud_ota_flush_deferred_unlock(void)
     cloud_ota_service_report_unlock_record_ex(acc, mtd, uptime_ms, unlock_device);
 }
 
+void cloud_ota_service_flush_deferred_unlock(void)
+{
+    cloud_ota_flush_deferred_unlock();
+}
+
 void cloud_ota_service_queue_unlock_report_ex(const char *account, const char *method,
                                               uint32_t uptime_ms, int unlock_device)
 {
@@ -463,6 +521,7 @@ void cloud_ota_service_queue_unlock_report_ex(const char *account, const char *m
     s_defer_unlock_uptime = uptime_ms;
     s_defer_unlock_device = unlock_device;
     s_defer_unlock_pending = 1u;
+    cloud_ota_kick_cloud_task();
 }
 
 void cloud_ota_service_poll_5ms(void)
@@ -648,10 +707,10 @@ static uint8_t cloud_unlock_format_time_text(char *buf, size_t buf_sz,
                                              uint32_t stored_epoch_sec,
                                              uint32_t event_uptime_sec)
 {
-    if(app_wall_clock_format_unlock_event(buf, buf_sz, stored_epoch_sec, event_uptime_sec) != 0u) {
-        return 1u;
+    if(cloud_unlock_time_ready() == 0u) {
+        return 0u;
     }
-    return app_wall_clock_format_now(buf, buf_sz);
+    return app_wall_clock_format_unlock_event(buf, buf_sz, stored_epoch_sec, event_uptime_sec);
 }
 
 static uint8_t cloud_unlock_try_publish_now(const char *account, uint8_t method_code,
@@ -659,7 +718,12 @@ static uint8_t cloud_unlock_try_publish_now(const char *account, uint8_t method_
                                             uint32_t unlock_time_sec, uint32_t uptime_sec)
 {
     char time_txt[24];
+    char safe_acc[24];
+    char payload[400];
+    uint8_t bridge_ok;
+    uint8_t prop_ok;
 
+    (void)uptime_sec;
     if(cloud_unlock_format_time_text(time_txt, sizeof(time_txt), unlock_time_sec, uptime_sec) == 0u) {
         if(device_code == 2u) {
             UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] slave try pub no time\r\n");
@@ -668,15 +732,25 @@ static uint8_t cloud_unlock_try_publish_now(const char *account, uint8_t method_
         }
         return 0u;
     }
-    if(cloud_unlock_publish_live_fast(account, method_code, device_code, time_txt, seq) == 0u) {
+    cloud_json_copy_account(account, safe_acc, sizeof(safe_acc));
+    (void)snprintf(payload, sizeof(payload),
+                   "{\"method\":\"thing.event.property.post\",\"id\":%lu,"
+                   "\"params\":{\"unlock_account\":\"%s\",\"unlock_time\":\"%s\","
+                   "\"unlock_method\":%u,\"unlock_device\":%u},\"version\":\"1.0\"}",
+                   (unsigned long)seq, safe_acc, time_txt,
+                   (unsigned)method_code, (unsigned)device_code);
+    bridge_ok = cloud_unlock_publish_terminal_bridge(safe_acc, method_code, device_code,
+                                                     time_txt, seq);
+    if(bridge_ok != 0u) {
         if(device_code == 2u) {
-            UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] slave try pub fail\r\n");
+            UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] slave bridge ok\r\n");
         } else {
-            UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] host try pub fail\r\n");
+            UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] host live ok\r\n");
         }
-        return 0u;
     }
-    return 1u;
+    cloud_unlock_bridge_gap();
+    prop_ok = cloud_unlock_publish_property_resilient(payload);
+    return prop_ok;
 }
 
 void cloud_ota_service_report_unlock_record_ex(const char *account, const char *method,
@@ -714,21 +788,9 @@ void cloud_ota_service_report_unlock_record_ex(const char *account, const char *
     }
 #endif
 
+    /* 未同步时间：不写 Flash、不上传（对齐 GitHub 参考逻辑） */
     if(cloud_unlock_time_ready() == 0u) {
-        if(unlock_device == CLOUD_UNLOCK_DEVICE_SLAVE) {
-            char dbg[96];
-            (void)snprintf(dbg, sizeof(dbg),
-                           "[UNLOCK] slave drop no time sn=%u clk=%u wifi=%u mqtt=%u\r\n",
-                           (unsigned)cloud_aliyun_at_time_is_synced(),
-                           (unsigned)app_wall_clock_valid(),
-                           (unsigned)cloud_aliyun_at_wifi_link_ready(),
-                           (unsigned)cloud_aliyun_at_is_online());
-            UNLOCK_CLOUD_TRACE_MSG(dbg);
-            return;
-        }
-        UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] host queue flash no time\r\n");
-        app_unlock_flash_append(pub_acc, method_code, device_code, 0u, uptime_sec, seq);
-        cloud_aliyun_at_invalidate_unlock_flush();
+        UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] drop no time\r\n");
         return;
     }
 
@@ -738,11 +800,8 @@ void cloud_ota_service_report_unlock_record_ex(const char *account, const char *
        cloud_aliyun_at_is_online() != 0u &&
        cloud_unlock_try_publish_now(pub_acc, method_code, device_code, seq, unlock_time_sec,
                                     uptime_sec) != 0u) {
-        if(unlock_device == CLOUD_UNLOCK_DEVICE_SLAVE) {
-            UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] slave live ok\r\n");
-        } else {
-            UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] host live ok\r\n");
-        }
+        WIFI_DBG("unlock live ok seq=%lu acc=%s mtd=%s",
+                 (unsigned long)seq, pub_acc, mtd);
         return;
     }
 
@@ -751,6 +810,8 @@ void cloud_ota_service_report_unlock_record_ex(const char *account, const char *
     } else {
         UNLOCK_CLOUD_TRACE_MSG("[UNLOCK] host queue flash\r\n");
     }
+    WIFI_DBG("unlock queue flash seq=%lu acc=%s mtd=%s cnt=%u",
+             (unsigned long)seq, pub_acc, mtd, (unsigned)app_unlock_flash_count());
     app_unlock_flash_append(pub_acc, method_code, device_code, unlock_time_sec, uptime_sec, seq);
     cloud_aliyun_at_invalidate_unlock_flush();
 }

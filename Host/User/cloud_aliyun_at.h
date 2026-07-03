@@ -32,12 +32,13 @@ void cloud_aliyun_at_wifi_join_diag_printf(void);
 #endif
 /** 仅发出 property/post（SEND OK 即成功，不等待 post_reply） */
 uint8_t cloud_aliyun_at_publish_property_send(const char *json_payload);
-/** 等待 post_reply：1=200，2=超时未拒绝(SEND ok)，0=明确失败 */
+/** 等待 post_reply：1=code200，0=明确失败，2=超时无 reply（均不算成功） */
 uint8_t cloud_aliyun_at_property_post_await(uint32_t wait_ms);
 uint8_t cloud_aliyun_at_publish_property(const char *json_payload);
 /** 向任意 MQTT Topic 发布 QoS0 JSON。 @return 1=已发出 */
 uint8_t cloud_aliyun_at_mqtt_publish_qos0(const char *topic, const char *json_payload);
 void cloud_aliyun_at_invalidate_unlock_flush(void);
+void cloud_aliyun_at_time_sync_done(void);
 
 /* Shared UART2 (ESP WiFi) for WiFi settings UI scan/connect */
 void cloud_uart2_ensure_init(void);

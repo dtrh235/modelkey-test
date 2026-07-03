@@ -28,6 +28,11 @@ const char *ui3_wifi_modal_ssid(void);
 /* 1=界面应显示「扫描中」（仅在实际扫描/pending 且未超时） */
 uint8_t ui3_wifi_scan_ui_active(ui3_state_t *st);
 
+/* 增量更新 WiFi 连接结果（对齐 Guider screen_wifi_show_connect_result） */
+void ui3_wifi_show_connect_result(ui3_state_t *st, uint8_t ok);
+void ui3_wifi_notify_sta_up(void);
+void ui3_wifi_notify_connect_fail(void);
+
 void ui3_pair_on_enter(ui3_state_t *st);
 void ui3_pair_sync(ui3_state_t *st);
 void ui3_pair_regen(ui3_state_t *st);

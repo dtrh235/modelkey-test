@@ -5,6 +5,10 @@
 
 #include "app_config.h"
 #include "SYSTEM/delay/delay.h"
+#if (APP_USE_FREERTOS == 1)
+#include "FreeRTOS.h"
+#include "semphr.h"
+#endif
 #if (APP_W25Q_DEBUG != 0)
 #include "SYSTEM/usart/usart.h"
 #define W25Q_LOG(fmt, ...) do { \
@@ -49,6 +53,32 @@
 #endif
 
 static uint8_t s_w25q_ready;
+#if (APP_USE_FREERTOS == 1)
+static SemaphoreHandle_t s_w25q_mtx;
+#endif
+
+void bsp_w25q16_lock(void)
+{
+#if (APP_USE_FREERTOS == 1)
+    if(s_w25q_mtx == NULL) {
+        s_w25q_mtx = xSemaphoreCreateRecursiveMutex();
+    }
+    if(s_w25q_mtx != NULL) {
+        (void)xSemaphoreTakeRecursive(s_w25q_mtx, portMAX_DELAY);
+    }
+#else
+    /* bare-metal: single-threaded */
+#endif
+}
+
+void bsp_w25q16_unlock(void)
+{
+#if (APP_USE_FREERTOS == 1)
+    if(s_w25q_mtx != NULL) {
+        (void)xSemaphoreGiveRecursive(s_w25q_mtx);
+    }
+#endif
+}
 
 static void w25q_delay_pins(void)
 {
@@ -223,11 +253,15 @@ static void w25q_gpio_soft_spi_setup(void)
 bool bsp_w25q16_read(uint32_t addr, uint8_t *buf, size_t len)
 {
     uint8_t hdr[4];
+    bool ok;
 
+    bsp_w25q16_lock();
     if(s_w25q_ready == 0u || buf == NULL || len == 0u) {
+        bsp_w25q16_unlock();
         return false;
     }
     if(addr + (uint32_t)len > 0x00200000u) {
+        bsp_w25q16_unlock();
         return false;
     }
 
@@ -245,24 +279,32 @@ bool bsp_w25q16_read(uint32_t addr, uint8_t *buf, size_t len)
         }
     }
     w25q_cs_high();
-    return true;
+    ok = true;
+    bsp_w25q16_unlock();
+    return ok;
 }
 
 bool bsp_w25q16_write_page(uint32_t addr, const uint8_t *buf, size_t len)
 {
     size_t i;
+    bool ok;
 
+    bsp_w25q16_lock();
     if(s_w25q_ready == 0u || buf == NULL || len == 0u) {
+        bsp_w25q16_unlock();
         return false;
     }
     if(((addr & 0xFFu) + len) > 256u) {
+        bsp_w25q16_unlock();
         return false;
     }
 
     if(!w25q_write_enable()) {
+        bsp_w25q16_unlock();
         return false;
     }
     if(!w25q_wait_not_busy()) {
+        bsp_w25q16_unlock();
         return false;
     }
 
@@ -280,22 +322,29 @@ bool bsp_w25q16_write_page(uint32_t addr, const uint8_t *buf, size_t len)
         w25q_cs_high();
     }
 
-    return w25q_wait_not_busy();
+    ok = w25q_wait_not_busy();
+    bsp_w25q16_unlock();
+    return ok;
 }
 
 bool bsp_w25q16_erase_sector_4k(uint32_t addr)
 {
     uint8_t cmd[4];
+    bool ok;
 
+    bsp_w25q16_lock();
     if(s_w25q_ready == 0u) {
+        bsp_w25q16_unlock();
         return false;
     }
     addr &= 0xFFFFF000u;
 
     if(!w25q_write_enable()) {
+        bsp_w25q16_unlock();
         return false;
     }
     if(!w25q_wait_not_busy()) {
+        bsp_w25q16_unlock();
         return false;
     }
 
@@ -308,7 +357,9 @@ bool bsp_w25q16_erase_sector_4k(uint32_t addr)
     w25q_soft_send(cmd, sizeof(cmd));
     w25q_cs_high();
 
-    return w25q_wait_not_busy();
+    ok = w25q_wait_not_busy();
+    bsp_w25q16_unlock();
+    return ok;
 }
 
 uint32_t bsp_w25q16_read_jedec_id(void)
@@ -388,7 +439,9 @@ void bsp_w25q16_hw_diag(bsp_w25q16_hw_diag_t *out)
 
 bool bsp_w25q16_init(void)
 {
+    bsp_w25q16_lock();
     if(s_w25q_ready != 0u) {
+        bsp_w25q16_unlock();
         return true;
     }
 
@@ -404,20 +457,24 @@ bool bsp_w25q16_init(void)
         if(memcmp(id1, id2, sizeof(id1)) != 0 || !w25q_jedec_plausible(id1)) {
             W25Q_LOG("JEDEC fail %02X %02X %02X", id1[0], id1[1], id1[2]);
             w25q_gpio_deinit_lines();
+            bsp_w25q16_unlock();
             return false;
         }
         W25Q_LOG("JEDEC OK %02X %02X %02X", id1[0], id1[1], id1[2]);
     }
 
     s_w25q_ready = 1u;
+    bsp_w25q16_unlock();
     return true;
 }
 
 void bsp_w25q16_end_session(void)
 {
+    bsp_w25q16_lock();
     if(s_w25q_ready != 0u) {
         w25q_cs_high();
         w25q_gpio_deinit_lines();
         s_w25q_ready = 0u;
     }
+    bsp_w25q16_unlock();
 }

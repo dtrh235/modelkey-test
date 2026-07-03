@@ -1284,7 +1284,8 @@ void ui3_home_footer_sel(ui3_state_t *st)
 }
 
 lv_obj_t *ui3_detail_card(lv_obj_t *parent, const char *k, const char *v,
-                          bool show_chg, lv_event_cb_t on_chg, void *user)
+                          bool show_chg, lv_event_cb_t on_chg, void *user,
+                          lv_obj_t **out_val_lbl)
 {
     lv_obj_t *c = lv_obj_create(parent);
     lv_obj_remove_style_all(c);
@@ -1311,6 +1312,9 @@ lv_obj_t *ui3_detail_card(lv_obj_t *parent, const char *k, const char *v,
     lv_obj_set_width(vl, show_chg ? 150 : 190);
     lv_label_set_long_mode(vl, LV_LABEL_LONG_DOT);
     lv_obj_align(vl, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    if(out_val_lbl != NULL) {
+        *out_val_lbl = vl;
+    }
 
     if(show_chg) {
         lv_obj_t *chip = ui3_dock_btn(c, "更改", false, 40);

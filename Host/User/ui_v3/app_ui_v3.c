@@ -134,6 +134,7 @@ static void ui3_load(ui3_scr_id_t id)
     if(new_scr == NULL) {
         return;
     }
+    ui3_users_on_screen_changing();
     lv_scr_load(new_scr);
     if(old_scr != NULL && old_scr != new_scr) {
         lv_obj_del(old_scr);
@@ -241,7 +242,6 @@ void ui3_post_feedback_toast(const char *msg)
     s_post_fb.sub[0] = '\0';
     s_post_fb.kind = UI3_POST_FB_TOAST;
     s_post_fb.modal_success = 0u;
-    ui3_reload_current();
 }
 
 void ui3_post_feedback_modal(const char *title, const char *sub, bool success)
@@ -259,7 +259,6 @@ void ui3_post_feedback_modal(const char *title, const char *sub, bool success)
     s_post_fb.sub[sizeof(s_post_fb.sub) - 1u] = '\0';
     s_post_fb.kind = UI3_POST_FB_MODAL;
     s_post_fb.modal_success = success ? 1u : 0u;
-    ui3_reload_current();
 }
 
 static void ui3_post_feedback_pump(void)

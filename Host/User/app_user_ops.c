@@ -661,6 +661,10 @@ static uint8_t users_storage_should_defer_flush(void)
     if(app_ui_nav_is_busy() != 0u) {
         return 1u;
     }
+    /* 指纹/NFC 录入进行中推迟 Flash 擦写，避免与读卡并发导致扇区擦空 */
+    if(g_nfc_enroll_state == 1u || g_screen8_fp_enroll_state == 1u) {
+        return 1u;
+    }
     return 0u;
 }
 

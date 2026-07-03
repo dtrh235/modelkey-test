@@ -2,12 +2,22 @@
 #define APP_WIFI_DIAG_H
 
 #include "app_config.h"
+#include "SYSTEM/usart/usart.h"
 
 void app_wifi_diag_init(void);
 void app_wifi_trace_stage(const char *stage);
 void app_wifi_diag_log(const char *fmt, ...);
 void app_cloud_diag_log(const char *fmt, ...);
 void app_remember_diag_log(const char *fmt, ...);
+
+#ifndef APP_LOG_ESSENTIAL
+#define APP_LOG_ESSENTIAL 0
+#endif
+#if (APP_LOG_ESSENTIAL != 0)
+#define LOG_ESSENTIAL(s)  usart_debug_tx_str(s)
+#else
+#define LOG_ESSENTIAL(s)  ((void)0)
+#endif
 
 #if (APP_WIFI_UART_DEBUG != 0)
 #define WIFI_DBG(...) app_wifi_diag_log(__VA_ARGS__)

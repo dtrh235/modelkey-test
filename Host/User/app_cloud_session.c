@@ -16,7 +16,6 @@
 
 #define CLOUD_SESSION_CONNECT_MS    (90000u)
 #define CLOUD_SESSION_OFFLINE_MS    (2000u)
-#define CLOUD_SESSION_UPLOAD_GAP_MS (300u)
 
 typedef enum {
     SESS_OFF = 0,
@@ -27,20 +26,12 @@ typedef enum {
 static cloud_sess_st_t s_st = SESS_OFF;
 static uint32_t s_phase_ms = 0u;
 static uint32_t s_offline_ms = 0u;
-static uint32_t s_last_upload_ms = 0u;
-
-static int cloud_session_publish_cb(const char *json, void *ctx)
-{
-    (void)ctx;
-    return cloud_ota_service_publish_flash_json(json);
-}
 
 void app_cloud_session_init(void)
 {
     s_st = SESS_OFF;
     s_phase_ms = 0u;
     s_offline_ms = 0u;
-    s_last_upload_ms = 0u;
 }
 
 void app_cloud_session_wifi_down(void)
@@ -48,7 +39,6 @@ void app_cloud_session_wifi_down(void)
     s_st = SESS_OFF;
     s_phase_ms = 0u;
     s_offline_ms = 0u;
-    s_last_upload_ms = 0u;
     app_pair_mark_ui_dirty();
     CLOUD_TRACE_MSG("[CLOUD] session wifi down\r\n");
 }
@@ -114,7 +104,7 @@ void app_cloud_session_poll(void)
             s_offline_ms = 0u;
             app_pair_mark_ui_dirty();
             CLOUD_DBG("session MQTT online persistent");
-            cloud_ota_service_flush_unlock_pending();
+            cloud_aliyun_at_invalidate_unlock_flush();
             break;
         }
         if((now - s_phase_ms) >= CLOUD_SESSION_CONNECT_MS) {
@@ -133,15 +123,6 @@ void app_cloud_session_poll(void)
     case SESS_ONLINE:
         if(cloud_aliyun_at_is_online() != 0u) {
             s_offline_ms = 0u;
-            if(cloud_aliyun_at_time_is_synced() != 0u &&
-               app_wall_clock_valid() != 0u &&
-               app_unlock_flash_count() > 0u &&
-               (s_last_upload_ms == 0u ||
-                (now - s_last_upload_ms) >= CLOUD_SESSION_UPLOAD_GAP_MS)) {
-                cloud_ota_service_flush_property_retry();
-                (void)app_unlock_flash_upload_next(cloud_session_publish_cb, NULL);
-                s_last_upload_ms = now;
-            }
             break;
         }
         if(cloud_aliyun_at_mqtt_connecting() != 0u) {

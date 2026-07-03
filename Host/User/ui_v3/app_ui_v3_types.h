@@ -75,6 +75,11 @@ typedef struct {
     lv_obj_t *btn_home_unlock;
     lv_obj_t *footer_btn_back;
     lv_obj_t *footer_btn_ok;
+    lv_obj_t *wifi_list_track;
+    lv_obj_t *wifi_scan_lbl;
+    lv_obj_t *edit_lbl_fp;
+    lv_obj_t *edit_lbl_nfc;
+    lv_obj_t *edit_lbl_pwd;
     uint8_t footer_ok_fill;
     uint8_t footer_back_fill;
     lv_obj_t *menu_track;

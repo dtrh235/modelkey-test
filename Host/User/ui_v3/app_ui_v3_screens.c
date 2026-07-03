@@ -7,6 +7,7 @@
 #include "app_ui_v3_services.h"
 #include "app_ui_v3.h"
 #include "app_wifi_scan.h"
+#include "cloud_aliyun_at.h"
 #include "app_state.h"
 #include "stm32f4xx_hal.h"
 #include <stdio.h>
@@ -445,7 +446,7 @@ static void cb_wifi_pick(lv_event_t *e)
     st->wifi_pwd[0] = '\0';
     st->wifi_pending_ssid[0] = '\0';
     ui3_wifi_pwd_modal_close();
-    ui3_reload_current();
+    ui3_wifi_refresh_list(st);
 }
 
 static void cb_wifi_scan(lv_event_t *e)
@@ -459,7 +460,7 @@ static void cb_wifi_scan(lv_event_t *e)
         return;
     }
     ui3_wifi_request_scan(st);
-    ui3_reload_current();
+    ui3_wifi_refresh_list(st);
 }
 
 static void cb_wifi_connect(lv_event_t *e)
@@ -467,7 +468,10 @@ static void cb_wifi_connect(lv_event_t *e)
     ui3_state_t *st = ui3_state();
     (void)e;
     ui3_wifi_try_connect(st);
-    ui3_reload_current();
+    if(st->wifi_modal != 0u && st->wifi_pending_ssid[0] != '\0') {
+        ui3_show_wifi_pwd_modal(lv_scr_act(), st->wifi_pending_ssid);
+        ui3_wifi_pwd_modal_refresh(st->wifi_pwd);
+    }
 }
 
 static void cb_pair_regen(lv_event_t *e)
@@ -492,6 +496,7 @@ static void cb_nfc_remove(lv_event_t *e)
     (void)e;
     if(ui3_users_clear_nfc(st->edit_acc)) {
         st->edit_has_nfc = 0u;
+        ui3_edit_user_refresh_creds(st);
         ui3_show_modal_result(lv_scr_act(), "已移除 NFC", NULL, true);
     } else {
         ui3_show_modal_result(lv_scr_act(), "移除失败", "未绑定 NFC", false);
@@ -635,19 +640,8 @@ static void build_user_list(ui3_state_t *st, ui3_layout_t *lo)
     ui3_footer_back(lo, cb_nav_back, st);
 }
 
-static void build_wifi(ui3_state_t *st, ui3_layout_t *lo)
+static void wifi_update_scroll_params(ui3_state_t *st, uint8_t count)
 {
-    uint8_t count;
-    uint8_t i;
-    ui3_wifi_row_t row;
-
-    ui3_topbar(lo, st);
-    ui3_page_head(lo, "无线网络", NULL, true);
-
-    lv_obj_t *scan = ui3_wifi_scan_link(lo->root, ui3_wifi_scan_ui_active(st) != 0u, cb_wifi_scan, st);
-    lv_obj_align(scan, LV_ALIGN_TOP_RIGHT, -12, 36);
-
-    count = ui3_wifi_row_count();
     st->scroll_row_h = (uint8_t)((UI3_LIST_ROW_H - 6) + 8);
     st->scroll_visible = (uint8_t)(UI3_WIFI_VIEWPORT_H / st->scroll_row_h);
     if(st->scroll_visible < 1u) {
@@ -664,9 +658,15 @@ static void build_wifi(ui3_state_t *st, ui3_layout_t *lo)
     if(st->scroll_px > st->scroll_max) {
         st->scroll_px = st->scroll_max;
     }
+}
 
-    lv_obj_t *track = ui3_scroll_viewport(lo, UI3_WIFI_VIEWPORT_H);
-    lv_obj_align(lv_obj_get_parent(track), LV_ALIGN_TOP_MID, 0, 68);
+static void wifi_populate_track(ui3_state_t *st, lv_obj_t *track)
+{
+    uint8_t count = ui3_wifi_row_count();
+    uint8_t i;
+    ui3_wifi_row_t row;
+
+    lv_obj_clean(track);
     if(count == 0u) {
         lv_obj_t *hint = lv_label_create(track);
         if(ui3_wifi_scan_ui_active(st) != 0u) {
@@ -685,7 +685,58 @@ static void build_wifi(ui3_state_t *st, ui3_layout_t *lo)
         }
     }
     ui3_scroll_apply(st, track, false);
-    ui3_gesture_bind(st, track);
+}
+
+void ui3_wifi_refresh_list(ui3_state_t *st)
+{
+    uint8_t count;
+
+    if(st == NULL || st->scr != UI3_SCR_WIFI) {
+        return;
+    }
+    ui3_wifi_refresh_scan_lbl(st);
+    if(st->wifi_list_track == NULL || !lv_obj_is_valid(st->wifi_list_track)) {
+        return;
+    }
+    count = ui3_wifi_row_count();
+    wifi_update_scroll_params(st, count);
+    wifi_populate_track(st, st->wifi_list_track);
+}
+
+void ui3_wifi_refresh_scan_lbl(ui3_state_t *st)
+{
+    if(st == NULL || st->scr != UI3_SCR_WIFI) {
+        return;
+    }
+    if(st->wifi_scan_lbl != NULL && lv_obj_is_valid(st->wifi_scan_lbl)) {
+        if(cloud_aliyun_at_wifi_link_ready() != 0u && app_wifi_scan_busy() == 0u &&
+           cloud_aliyun_at_cwlap_scan_async_active() == 0u) {
+            st->wifi_scanning = 0u;
+            lv_label_set_text(st->wifi_scan_lbl, "刷新列表");
+        } else {
+            lv_label_set_text(st->wifi_scan_lbl,
+                              ui3_wifi_scan_ui_active(st) != 0u ? "扫描中…" : "刷新列表");
+        }
+    }
+}
+
+static void build_wifi(ui3_state_t *st, ui3_layout_t *lo)
+{
+    uint8_t count;
+
+    ui3_topbar(lo, st);
+    ui3_page_head(lo, "无线网络", NULL, true);
+
+    st->wifi_scan_lbl = ui3_wifi_scan_link(lo->root, ui3_wifi_scan_ui_active(st) != 0u, cb_wifi_scan, st);
+    lv_obj_align(st->wifi_scan_lbl, LV_ALIGN_TOP_RIGHT, -12, 36);
+
+    count = ui3_wifi_row_count();
+    wifi_update_scroll_params(st, count);
+
+    st->wifi_list_track = ui3_scroll_viewport(lo, UI3_WIFI_VIEWPORT_H);
+    lv_obj_align(lv_obj_get_parent(st->wifi_list_track), LV_ALIGN_TOP_MID, 0, 68);
+    wifi_populate_track(st, st->wifi_list_track);
+    ui3_gesture_bind(st, st->wifi_list_track);
     ui3_footer_dock(lo, "连接", true, cb_wifi_connect, cb_nav_back, st, true);
     if(st->wifi_modal != 0u && st->wifi_pending_ssid[0] != '\0') {
         ui3_show_wifi_pwd_modal(lo->root, st->wifi_pending_ssid);
@@ -710,6 +761,10 @@ static void build_edit_user(ui3_state_t *st, ui3_layout_t *lo)
     char pwd_mask[32];
     char cur_pwd[16];
     const uint8_t edit_rows = 5u;
+
+    st->edit_lbl_fp = NULL;
+    st->edit_lbl_nfc = NULL;
+    st->edit_lbl_pwd = NULL;
 
     if(st->edit_acc[0] != '\0' && ui3_users_lookup(st->edit_acc, &row)) {
         if(st->edit_role_dirty == 0u) {
@@ -739,22 +794,49 @@ static void build_edit_user(ui3_state_t *st, ui3_layout_t *lo)
     }
 
     lv_obj_t *track = ui3_scroll_viewport(lo, UI3_LIST_VIEWPORT_H);
-    ui3_detail_card(track, "账号", st->edit_acc, false, NULL, NULL);
+    ui3_detail_card(track, "账号", st->edit_acc, false, NULL, NULL, NULL);
     if(st->edit_pwd_editing != 0u) {
         ui3_pwd_mask_fill(pwd_mask, sizeof(pwd_mask), st->edit_pwd);
         ui3_inputs_track(st, 0u, ui3_field_block(track, "新密码", pwd_mask, st->edit_field == 1u,
                                                    false, cb_edit_field, st));
     } else {
         ui3_inputs_reset(st);
-        ui3_detail_card(track, "密码", cur_pwd[0] ? cur_pwd : "未设置", true, cb_edit_pwd_chg, st);
+        ui3_detail_card(track, "密码", cur_pwd[0] ? cur_pwd : "未设置", true, cb_edit_pwd_chg, st,
+                        &st->edit_lbl_pwd);
     }
     ui3_role_picker(track, st->edit_is_admin != 0u, false,
                     cb_edit_role_user, cb_edit_role_admin, st);
-    ui3_detail_card(track, "指纹", st->edit_has_fp ? "已录入" : "未录入", true, cb_edit_fp_chg, st);
-    ui3_detail_card(track, "NFC 卡", st->edit_has_nfc ? "已绑定" : "未绑定", true, cb_edit_nfc_chg, st);
+    ui3_detail_card(track, "指纹", st->edit_has_fp ? "已录入" : "未录入", true, cb_edit_fp_chg, st,
+                    &st->edit_lbl_fp);
+    ui3_detail_card(track, "NFC 卡", st->edit_has_nfc ? "已绑定" : "未绑定", true, cb_edit_nfc_chg, st,
+                    &st->edit_lbl_nfc);
     ui3_scroll_apply(st, track, false);
     ui3_gesture_bind(st, track);
     ui3_footer_dock(lo, "保存", true, cb_edit_save, cb_edit_back_menu, st, true);
+}
+
+void ui3_edit_user_refresh_creds(ui3_state_t *st)
+{
+    ui3_user_row_t row;
+    char cur_pwd[16];
+
+    if(st == NULL || st->scr != UI3_SCR_EDIT_USER) {
+        return;
+    }
+    if(st->edit_acc[0] != '\0' && ui3_users_lookup(st->edit_acc, &row)) {
+        st->edit_has_fp = row.has_fp;
+        st->edit_has_nfc = row.has_nfc;
+    }
+    if(st->edit_lbl_fp != NULL && lv_obj_is_valid(st->edit_lbl_fp)) {
+        lv_label_set_text(st->edit_lbl_fp, st->edit_has_fp ? "已录入" : "未录入");
+    }
+    if(st->edit_lbl_nfc != NULL && lv_obj_is_valid(st->edit_lbl_nfc)) {
+        lv_label_set_text(st->edit_lbl_nfc, st->edit_has_nfc ? "已绑定" : "未绑定");
+    }
+    if(st->edit_pwd_editing == 0u && st->edit_lbl_pwd != NULL && lv_obj_is_valid(st->edit_lbl_pwd) &&
+       ui3_users_get_password(st->edit_acc, cur_pwd, sizeof(cur_pwd))) {
+        lv_label_set_text(st->edit_lbl_pwd, cur_pwd[0] ? cur_pwd : "未设置");
+    }
 }
 
 static void build_unlock(ui3_state_t *st, ui3_layout_t *lo)
@@ -810,6 +892,11 @@ lv_obj_t *ui3_build_screen(ui3_state_t *st)
     st->btn_home_unlock = NULL;
     st->footer_btn_back = NULL;
     st->footer_btn_ok = NULL;
+    st->wifi_list_track = NULL;
+    st->wifi_scan_lbl = NULL;
+    st->edit_lbl_fp = NULL;
+    st->edit_lbl_nfc = NULL;
+    st->edit_lbl_pwd = NULL;
     st->footer_sel = UI3_FOOTER_SEL_NONE;
     if(st->scr != UI3_SCR_MENU) {
         st->menu_armed = 0u;

@@ -41,6 +41,8 @@
 #include "app_host_hw_selftest.h"
 #include "app_wall_clock.h"
 #include "app_config.h"
+#include "app_unlock_flash_queue.h"
+#include "app_user_ops.h"
 #if (APP_UI_V3_ENABLE == 1)
 #include "app_ui_v3.h"
 #endif
@@ -66,14 +68,14 @@
 #define APP_TASK_PRIO_NFC      3u
 #define APP_TASK_PRIO_GUI      5u
 
-#define APP_TASK_STACK_STORAGE 1536u
-/* CloudTask：WiFi 独占时栈需容纳 CWLAP 调用链 */
-#define APP_TASK_STACK_CLOUD   5120u
+#define APP_TASK_STACK_STORAGE 2048u
+/* CloudTask：WiFi CWLAP 链较深；5120w+其余任务会超 48KB 堆→任务创建失败白屏卡死，4096w 实测可链 */
+#define APP_TASK_STACK_CLOUD   4096u
 #define APP_TASK_STACK_FP      768u
 #define APP_TASK_STACK_NFC     768u
 #define APP_TASK_STACK_GUI     3072u
 #define APP_TASK_STACK_HOME_AUTH 768u
-#define APP_TASK_PRIO_HOME_AUTH  3u
+#define APP_TASK_PRIO_HOME_AUTH  3u  /* 低于 Gui(5)：屏幕优先，与 GitHub 一致 */
 
 static void app_process_cloud_uart_lines(void)
 {
@@ -136,7 +138,7 @@ static void app_gui_task(void *argument)
             app_host_hw_selftest_run_deferred();
         }
 #endif
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1u));
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(5u));
 #else
         if(g_screen3_need_init && lv_scr_act() == guider_ui.screen_3) {
             screen3_init_scroll_layout();
@@ -232,6 +234,7 @@ static void app_cloud_task(void *argument)
 #endif
 
     for(;;) {
+        (void)ulTaskNotifyTake(pdTRUE, 0);
 #if (APP_CLOUD_ENABLE == 1)
         /* ESP 复位+UART2 约 5s，须在调度器后执行，避免 main 里阻塞导致白屏 */
         if(s_cloud_boot_done == 0u) {
@@ -266,6 +269,7 @@ static void app_cloud_task(void *argument)
             uint8_t conn_busy = app_wifi_connect_busy();
             uint8_t mqtt_work = (uint8_t)(
                 cloud_aliyun_at_wifi_link_ready() != 0u ||
+                cloud_aliyun_at_is_online() != 0u ||
                 app_link_guard_active() != 0u ||
                 cloud_aliyun_at_wifi_bringup_active() != 0u);
             uint8_t need_cloud = (uint8_t)(uart_work != 0u || conn_busy != 0u || mqtt_work != 0u);
@@ -355,9 +359,15 @@ static void app_cloud_task(void *argument)
         }
 #endif
 
-        if((HAL_GetTick() - cloud_poll_ms) >= 30u) {
-            cloud_poll_ms = HAL_GetTick();
-            tcp_mqtt_while();
+        {
+            uint32_t poll_iv = (cloud_aliyun_at_is_online() != 0u ||
+                                cloud_aliyun_at_mqtt_connecting() != 0u ||
+                                cloud_aliyun_at_wifi_bringup_active() != 0u) ? 5u : 30u;
+
+            if((HAL_GetTick() - cloud_poll_ms) >= poll_iv) {
+                cloud_poll_ms = HAL_GetTick();
+                tcp_mqtt_while();
+            }
         }
 
         vTaskDelay(pdMS_TO_TICKS(5u));
@@ -418,9 +428,11 @@ static void app_storage_task(void *argument)
     app_rtos_log_stack_hwm("Storage");
 #endif
     users_storage_task_register_current();
+    app_unlock_flash_bind_storage_task(xTaskGetCurrentTaskHandle());
 
     for(;;) {
         users_storage_task_wait_and_flush(250u);
+        (void)app_unlock_flash_flush_if_dirty();
     }
 }
 
@@ -490,6 +502,7 @@ static void app_create_tasks(void)
                                   &s_cloud_task_hdl);
     if(ok != 0u) {
         app_wifi_scan_bind_cloud_task(s_cloud_task_hdl);
+        cloud_ota_service_bind_cloud_task(s_cloud_task_hdl);
     }
 #if (APP_TEMP_DISABLE_BIOMETRIC == 0) && (APP_NFC_ENABLE != 0)
     ok &= app_create_task_checked(app_nfc_task, "Nfc", APP_TASK_STACK_NFC, APP_TASK_PRIO_NFC, NULL);
@@ -561,8 +574,19 @@ int main(void)
 #endif
 #if (APP_TOUCH_UART_DEBUG != 0)
     usart_debug_tx_str("\r\n=== Touch debug USART1 PA9=TX PA10=RX 115200 [TP] only ===\r\n");
+#elif (APP_LOG_ESSENTIAL != 0)
+#if (APP_DEBUG_VIA_RS485 != 0)
+    usart_debug_tx_str("\r\n=== Host DI_485 H11 PC6=TX 115200 ===\r\n");
+#elif (APP_DEBUG_ON_USART6 != 0)
+    usart_debug_tx_str("\r\n=== Host USART6 PC6=TX 115200 ===\r\n");
+#else
+    usart_debug_tx_str("\r\n=== Host USART1 PA9=TX 115200 ===\r\n");
+#endif
+    usart_debug_tx_str("[FW] build " __DATE__ " " __TIME__ " ui3-wf24s\r\n");
 #elif (APP_WIFI_UART_DEBUG != 0) || (APP_CLOUD_TRACE != 0)
-#if (APP_DEBUG_ON_USART6 != 0)
+#if (APP_DEBUG_VIA_RS485 != 0)
+    usart_debug_tx_str("\r\n=== WiFi/Cloud debug DI_485 H11 PC6=TX 115200 ===\r\n");
+#elif (APP_DEBUG_ON_USART6 != 0)
     usart_debug_tx_str("\r\n=== WiFi/Cloud debug USART6 PC6=TX PC7=RX 115200 ===\r\n");
 #else
     usart_debug_tx_str("\r\n=== WiFi/Cloud debug USART1 PA9=TX PA10=RX 115200 ===\r\n");

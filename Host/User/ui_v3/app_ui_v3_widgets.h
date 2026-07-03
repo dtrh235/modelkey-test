@@ -53,7 +53,8 @@ void ui3_home_build(ui3_layout_t *lo, ui3_state_t *st,
                     lv_event_cb_t on_menu, lv_event_cb_t on_unlock, lv_event_cb_t on_lock);
 void ui3_home_footer_sel(ui3_state_t *st);
 lv_obj_t *ui3_detail_card(lv_obj_t *parent, const char *k, const char *v,
-                          bool show_chg, lv_event_cb_t on_chg, void *user);
+                          bool show_chg, lv_event_cb_t on_chg, void *user,
+                          lv_obj_t **out_val_lbl);
 lv_obj_t *ui3_user_row(lv_obj_t *parent, const char *acc, bool admin, bool sel);
 lv_obj_t *ui3_wifi_banner(lv_obj_t *parent, const char *ssid, const char *sub, uint8_t rssi);
 lv_obj_t *ui3_wifi_scan_link(lv_obj_t *parent, bool scanning, lv_event_cb_t cb, void *user);

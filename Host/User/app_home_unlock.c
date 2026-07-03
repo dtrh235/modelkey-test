@@ -47,6 +47,8 @@ extern char g_default_admin_account[13];
 static uint32_t s_home_nfc_last_poll_ms = 0u;
 static uint32_t s_home_auth_last_ms = 0u;
 static uint8_t s_home_auth_phase = 0u; /* 0=NFC, 1=指纹 */
+static uint8_t s_nfc_uid_last[4];
+static uint8_t s_nfc_hit = 0u;
 
 extern uint32_t g_home_fp_last_poll_ms;
 extern uint8_t g_fp_hw_inited;
@@ -56,11 +58,11 @@ static uint32_t s_home_unlock_popup_ms = 0u;
 static volatile uint8_t s_home_unlock_visible = 0u;
 
 #ifndef APP_UNLOCK_MATCH_COOLDOWN_MS
-#define APP_UNLOCK_MATCH_COOLDOWN_MS 2600u
+#define APP_UNLOCK_MATCH_COOLDOWN_MS 1200u
 #endif
 static uint32_t s_unlock_match_cooldown_until = 0u;
 
-#define APP_HOME_UNLOCK_POPUP_MS 2500u
+#define APP_HOME_UNLOCK_POPUP_MS 1200u
 #define APP_HOME_UNLOCK_LETTER_SPACE 4
 
 static void app_home_unlock_popup_close(void)
@@ -237,6 +239,13 @@ void app_home_auth_poll_tick(void)
     s_home_auth_phase ^= 1u;
 }
 
+void app_home_nfc_reset_debounce(void)
+{
+    memset(s_nfc_uid_last, 0, sizeof(s_nfc_uid_last));
+    s_nfc_hit = 0u;
+    s_home_nfc_last_poll_ms = 0u;
+}
+
 void app_home_nfc_poll_handle(void)
 {
     uint8_t uid[4];
@@ -249,8 +258,10 @@ void app_home_nfc_poll_handle(void)
     static uint32_t s_last_health_check = 0u;
 
     if(g_app_scr != APP_SCR_HOME) return;
-    if(app_home_unlock_popup_visible()) return;
-    if((now - s_home_nfc_last_poll_ms) < 200u) return;
+    if(app_home_unlock_popup_visible()) {
+        return;
+    }
+    if((now - s_home_nfc_last_poll_ms) < APP_HOME_POLL_INTERVAL_MS) return;
     s_home_nfc_last_poll_ms = now;
 
     /* 冷启动如果 init_once 没立起 ready，再补一次完整初始化。 */
@@ -323,9 +334,6 @@ void app_home_nfc_poll_handle(void)
 #endif
     }
     if(got_card == 1u) {
-        static uint8_t s_nfc_uid_last[4];
-        static uint8_t s_nfc_hit = 0u;
-
         if(memcmp(uid, s_nfc_uid_last, 4) == 0) {
             if(s_nfc_hit < 255u) {
                 s_nfc_hit++;
@@ -350,6 +358,7 @@ void app_home_nfc_poll_handle(void)
         }
         APP_UNLOCK_LOG("nfc uid confirmed match=%u acc=%s", matched, unlock_acc);
         if(matched) {
+            app_home_nfc_reset_debounce();
             app_unlock_event_handle_success(APP_UNLOCK_POPUP_HOME, unlock_acc, "nfc");
         }
     }

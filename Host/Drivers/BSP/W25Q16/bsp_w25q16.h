@@ -28,6 +28,9 @@ typedef struct {
 
 bool bsp_w25q16_init(void);
 void bsp_w25q16_end_session(void);
+/* FreeRTOS：跨 erase/write 等多步操作时先 lock，结束后再 unlock */
+void bsp_w25q16_lock(void);
+void bsp_w25q16_unlock(void);
 uint32_t bsp_w25q16_read_jedec_id(void);
 /* 不保持会话，仅探测 JEDEC（调试用） */
 uint32_t bsp_w25q16_probe_jedec_id(void);

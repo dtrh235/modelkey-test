@@ -1,4 +1,5 @@
 #include "app_ui_v3_services.h"
+#include "app_ui_v3_screens.h"
 
 #if (APP_UI_V3_ENABLE == 1)
 
@@ -17,10 +18,62 @@
 #include <stdio.h>
 #include "stm32f4xx_hal.h"
 
+#if (APP_WIFI_UART_DEBUG == 0)
+#undef printf
+#define printf(...) ((void)0)
+#endif
+
 static char s_wifi_modal_ssid[33];
 static uint8_t s_wifi_modal_on;
 static char s_pair_status[48];
 static uint32_t s_wifi_scan_ui_since_ms;
+static volatile uint8_t s_wifi_pending_sta_up;
+static volatile uint8_t s_wifi_pending_connect_fail;
+
+static void ui3_wifi_connect_ok_ui(ui3_state_t *st)
+{
+    if(st == NULL) {
+        return;
+    }
+    ui3_wifi_pwd_modal_close();
+    st->wifi_modal = 0u;
+    st->wifi_pending_ssid[0] = '\0';
+    ui3_wifi_show_connect_result(st, 1u);
+    ui3_wifi_refresh_scan_lbl(st);
+}
+
+static void ui3_wifi_connect_fail_ui(ui3_state_t *st)
+{
+    if(st == NULL) {
+        return;
+    }
+    ui3_wifi_pwd_modal_close();
+    st->wifi_modal = 0u;
+    ui3_wifi_show_connect_result(st, 0u);
+    ui3_wifi_refresh_list(st);
+}
+
+void ui3_wifi_show_connect_result(ui3_state_t *st, uint8_t ok)
+{
+    if(st == NULL) {
+        return;
+    }
+    st->wifi_scanning = 0u;
+    if(st->wifi_scan_lbl != NULL && lv_obj_is_valid(st->wifi_scan_lbl)) {
+        lv_label_set_text(st->wifi_scan_lbl, ok != 0u ? "连接成功" : "连接失败");
+    }
+}
+
+void ui3_wifi_notify_sta_up(void)
+{
+    /* CloudTask 只置位；LVGL 在 GuiTask 的 ui3_services_poll 里处理 */
+    s_wifi_pending_sta_up = 1u;
+}
+
+void ui3_wifi_notify_connect_fail(void)
+{
+    s_wifi_pending_connect_fail = 1u;
+}
 
 uint8_t ui3_wifi_scan_ui_active(ui3_state_t *st)
 {
@@ -66,11 +119,22 @@ static uint8_t wifi_rssi_to_bars(int8_t rssi)
 void ui3_services_sync_cloud(ui3_state_t *st)
 {
     uint8_t online;
+    static uint32_t s_cloud_seen_ms;
+    uint32_t now;
 
     if(st == NULL) {
         return;
     }
-    online = app_pair_cloud_ready() ? 1u : 0u;
+    now = HAL_GetTick();
+    if(app_pair_cloud_ready() != 0u) {
+        s_cloud_seen_ms = now;
+        online = 1u;
+    } else if(s_cloud_seen_ms != 0u && (now - s_cloud_seen_ms) < 20000u) {
+        /* MQTT 发 CIPSEND 时 step 会短暂离开 ONLINE，避免顶栏闪「离线」 */
+        online = 1u;
+    } else {
+        online = 0u;
+    }
     if(online != st->mqtt_online) {
         st->mqtt_online = online;
         ui3_topbar_cloud_refresh(st);
@@ -82,8 +146,10 @@ void ui3_services_poll(ui3_state_t *st)
     static uint8_t s_last_dirty;
     static uint32_t s_wifi_reload_ms;
     static uint8_t s_wifi_last_scan_busy;
+    static uint8_t s_wifi_was_linked;
     uint32_t now;
     uint8_t wifi_reload;
+    uint8_t linked;
 
     if(st == NULL) {
         return;
@@ -91,35 +157,54 @@ void ui3_services_poll(ui3_state_t *st)
     ui3_services_sync_cloud(st);
     now = HAL_GetTick();
     wifi_reload = 0u;
+    linked = cloud_aliyun_at_wifi_link_ready();
 
     if(st->scr == UI3_SCR_WIFI) {
+        if(s_wifi_pending_sta_up != 0u) {
+            s_wifi_pending_sta_up = 0u;
+            ui3_wifi_connect_ok_ui(st);
+        }
+        if(s_wifi_pending_connect_fail != 0u) {
+            s_wifi_pending_connect_fail = 0u;
+            ui3_wifi_connect_fail_ui(st);
+        }
+        if(linked != 0u) {
+            if(s_wifi_was_linked == 0u) {
+                st->wifi_scanning = 0u;
+                s_wifi_scan_ui_since_ms = 0u;
+                ui3_wifi_refresh_scan_lbl(st);
+            } else if(st->wifi_scanning != 0u && app_wifi_scan_busy() == 0u &&
+                      cloud_aliyun_at_cwlap_scan_async_active() == 0u) {
+                st->wifi_scanning = 0u;
+                ui3_wifi_refresh_scan_lbl(st);
+            }
+        }
+        s_wifi_was_linked = linked;
+
         app_wifi_scan_gui_tick();
         app_wifi_connect_gui_recover();
 
         if(st->wifi_modal == 0u) {
             if(app_wifi_remember_scr11_poll() != 0u) {
-                ui3_post_feedback_toast("WiFi 已连接");
-                wifi_reload = 1u;
+                ui3_wifi_connect_ok_ui(st);
             } else {
                 uint8_t conn_r = app_wifi_connect_take_result();
                 uint8_t busy = app_wifi_scan_busy();
 
                 if(conn_r == 2u) {
-                    ui3_post_feedback_modal("连接失败", "请检查密码", false);
-                    wifi_reload = 1u;
+                    ui3_wifi_connect_fail_ui(st);
                 } else if(conn_r == 1u) {
-                    ui3_post_feedback_toast("WiFi 已连接");
-                    wifi_reload = 1u;
+                    ui3_wifi_connect_ok_ui(st);
                 } else if(app_wifi_scan_take_list_dirty() != 0u) {
                     st->wifi_scanning = 0u;
                     s_wifi_scan_ui_since_ms = 0u;
                     wifi_reload = 1u;
-                } else if(s_wifi_last_scan_busy != 0u && busy == 0u) {
+                } else if(linked == 0u && s_wifi_last_scan_busy != 0u && busy == 0u) {
                     st->wifi_scanning = 0u;
                     s_wifi_scan_ui_since_ms = 0u;
                     app_wifi_scan_release_uart2();
                     wifi_reload = 1u;
-                } else if(st->wifi_scanning != 0u && busy == 0u &&
+                } else if(linked == 0u && st->wifi_scanning != 0u && busy == 0u &&
                           app_wifi_scan_has_pending() == 0u &&
                           cloud_aliyun_at_cwlap_scan_async_active() == 0u) {
                     st->wifi_scanning = 0u;
@@ -128,7 +213,7 @@ void ui3_services_poll(ui3_state_t *st)
                 } else if(st->wifi_scanning != 0u && ui3_wifi_scan_ui_active(st) == 0u) {
                     st->wifi_scanning = 0u;
                     s_wifi_scan_ui_since_ms = 0u;
-                    wifi_reload = 1u;
+                    ui3_wifi_refresh_scan_lbl(st);
                 }
                 s_wifi_last_scan_busy = busy;
             }
@@ -138,10 +223,11 @@ void ui3_services_poll(ui3_state_t *st)
 
         if(wifi_reload != 0u && (now - s_wifi_reload_ms) >= 280u) {
             s_wifi_reload_ms = now;
-            ui3_reload_current();
+            ui3_wifi_refresh_list(st);
         }
     } else {
         s_wifi_last_scan_busy = 0u;
+        s_wifi_was_linked = 0u;
     }
 
     if(st->scr == UI3_SCR_PAIR) {
@@ -159,6 +245,8 @@ void ui3_services_poll(ui3_state_t *st)
 
 void ui3_wifi_on_enter(ui3_state_t *st)
 {
+    uint8_t linked;
+
     if(st == NULL) {
         return;
     }
@@ -176,19 +264,22 @@ void ui3_wifi_on_enter(ui3_state_t *st)
     ui3_wifi_pwd_modal_close();
 
     app_wifi_scan_ui_set_active(1u);
+    cloud_aliyun_at_scr11_enter();
+
+    linked = cloud_aliyun_at_wifi_link_ready();
+    if(linked != 0u) {
+        /* 已连 WiFi：勿 reset exclusive / connect，避免打断 MQTT */
+        st->wifi_scanning = 0u;
+        WIFI_TRACE("ui3 enter linked skip scan");
+        return;
+    }
+
     app_wifi_scan_reset();
     app_wifi_connect_reset();
     app_wifi_remember_scr11_reset();
     app_wifi_cfg_init_defaults();
-
-    if(cloud_aliyun_at_wifi_link_ready() != 0u) {
-        cloud_aliyun_at_request_wifi_ip_verify();
-        st->wifi_scanning = 0u;
-        WIFI_TRACE("ui3 enter linked skip scan");
-    } else {
-        WIFI_TRACE("ui3 enter auto scan");
-        ui3_wifi_request_scan(st);
-    }
+    WIFI_TRACE("ui3 enter auto scan");
+    ui3_wifi_request_scan(st);
 }
 
 void ui3_wifi_on_leave(void)

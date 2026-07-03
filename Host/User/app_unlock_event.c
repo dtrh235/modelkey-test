@@ -61,6 +61,9 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
 #endif
     board_relay_unlock_pulse();
     app_unlock_uart4_on_unlock_ok(account, method);
+#if (APP_HOST_NAV_DIAG != 0)
+    NAV_LOG("[UNLOCK] event acc=%s mtd=%s\r\n", account, method);
+#endif
     cloud_ota_service_report_event(CLOUD_EVT_UNLOCK_OK, account);
     if(strcmp(method, "remote") == 0) {
         cloud_ota_service_queue_unlock_report_ex("0", "phone", HAL_GetTick(),
@@ -69,7 +72,8 @@ void app_unlock_event_handle_success(app_unlock_popup_t popup_type,
         cloud_ota_service_queue_unlock_report_ex("temporary account", "temporary-password",
                                                    HAL_GetTick(), CLOUD_UNLOCK_DEVICE_MASTER);
     } else {
-        cloud_ota_service_queue_unlock_report(account, method, HAL_GetTick());
+        cloud_ota_service_queue_unlock_report_ex(account, method, HAL_GetTick(),
+                                                 CLOUD_UNLOCK_DEVICE_MASTER);
     }
 }
 

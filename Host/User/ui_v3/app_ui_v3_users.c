@@ -18,6 +18,7 @@
 #include "app_screen6_commit.h"
 #include "app_user_add_flow.h"
 #include "app_ui_v3_anim.h"
+#include "app_ui_v3_screens.h"
 #include "stm32f4xx_hal.h"
 
 #define UI3_LIST_MAX (APP_USER_MAX + 1u)
@@ -394,16 +395,19 @@ static void ui3_enroll_show_busy(lv_obj_t *parent, const char *title, const char
 {
     lv_obj_t *mask;
     lv_obj_t *sheet;
+    lv_obj_t *layer;
 
+    (void)parent;
     if(s_enroll_mask != NULL && lv_obj_is_valid(s_enroll_mask)) {
         lv_obj_del(s_enroll_mask);
     }
     s_enroll_mask = NULL;
-    if(parent == NULL || !lv_obj_is_valid(parent)) {
+    layer = lv_layer_top();
+    if(layer == NULL || !lv_obj_is_valid(layer)) {
         return;
     }
 
-    mask = lv_obj_create(parent);
+    mask = lv_obj_create(layer);
     s_enroll_mask = mask;
     lv_obj_remove_style_all(mask);
     lv_obj_set_size(mask, UI3_W, UI3_H);
@@ -425,6 +429,14 @@ static void ui3_enroll_show_busy(lv_obj_t *parent, const char *title, const char
     lv_obj_add_style(hint, ui3_style_label(), 0);
     lv_obj_set_style_text_color(hint, UI3_COL_INK_FAINT, 0);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -10);
+}
+
+void ui3_users_on_screen_changing(void)
+{
+    if(s_enroll_mask != NULL && lv_obj_is_valid(s_enroll_mask)) {
+        lv_obj_del(s_enroll_mask);
+    }
+    s_enroll_mask = NULL;
 }
 
 static void ui3_enroll_begin(uint8_t kind, lv_obj_t *parent, const char *title, const char *sub)
@@ -494,6 +506,8 @@ void ui3_users_nfc_start_replace(lv_obj_t *parent, const char *acc)
         return;
     }
     ui3_users_set_edit_target(acc);
+    (void)strncpy(g_enroll_target_acc, acc, sizeof(g_enroll_target_acc) - 1u);
+    g_enroll_target_acc[sizeof(g_enroll_target_acc) - 1u] = '\0';
     g_nfc_op = NFC_OP_REPLACE_SCREEN9;
     if(screen8_start_nfc_enroll_hw() == 0u) {
         ui3_show_modal_result(parent, "NFC 录入失败", "请重试", false);
@@ -573,21 +587,40 @@ void ui3_users_enroll_poll(void)
     g_screen8_fp_enroll_state = 0u;
     g_nfc_enroll_state = 0u;
 
-    if(st != NULL && st->scr == UI3_SCR_EDIT_USER && st->edit_acc[0] != '\0') {
+    if(st != NULL && st->edit_acc[0] != '\0') {
         ui3_user_row_t row;
         if(ui3_users_lookup(st->edit_acc, &row)) {
             st->edit_has_fp = row.has_fp;
             st->edit_has_nfc = row.has_nfc;
         }
     }
+    users_storage_kick_flush();
 
-    if(st != NULL &&
-       (st->scr == UI3_SCR_ADD_USER ||
-        (st->scr == UI3_SCR_EDIT_USER && st->edit_acc[0] != '\0'))) {
+    if(st != NULL && st->scr == UI3_SCR_EDIT_USER && st->edit_acc[0] != '\0') {
+        ui3_edit_user_refresh_creds(st);
         if(ok != 0u) {
-            ui3_post_feedback_toast(title);
+            ui3_show_toast(lv_scr_act(), title);
         } else {
-            ui3_post_feedback_modal(title, fail_sub, false);
+            ui3_show_modal_result(lv_scr_act(), title, fail_sub, false);
+        }
+        return;
+    }
+
+    if(st != NULL && (st->scr == UI3_SCR_NFC_MGMT || st->scr == UI3_SCR_FP_MGMT)) {
+        if(ok != 0u) {
+            ui3_show_toast(lv_scr_act(), title);
+            ui3_nav_back();
+        } else {
+            ui3_show_modal_result(lv_scr_act(), title, fail_sub, false);
+        }
+        return;
+    }
+
+    if(st != NULL && st->scr == UI3_SCR_ADD_USER) {
+        if(ok != 0u) {
+            ui3_show_toast(lv_scr_act(), title);
+        } else {
+            ui3_show_modal_result(lv_scr_act(), title, fail_sub, false);
         }
         return;
     }

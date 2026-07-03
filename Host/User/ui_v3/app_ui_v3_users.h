@@ -55,6 +55,7 @@ void ui3_users_nfc_start_replace(lv_obj_t *parent, const char *acc);
 bool ui3_users_clear_fp(const char *acc);
 bool ui3_users_clear_nfc(const char *acc);
 void ui3_users_enroll_poll(void);
+void ui3_users_on_screen_changing(void);
 
 #else
 

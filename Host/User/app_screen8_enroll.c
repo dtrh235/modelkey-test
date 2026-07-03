@@ -292,7 +292,8 @@ void screen8_handle_nfc_enroll(void)
         screen8_show_enroll_popup("NFC FAIL");
     } else {
         if(g_nfc_op == NFC_OP_REPLACE_SCREEN9) {
-            g_nfc_enroll_result = (g_screen5_found_acc[0] != '\0' && users_bind_nfc_by_acc(g_screen5_found_acc, card_id)) ? 1u : 0u;
+            const char *bind_acc = (g_enroll_target_acc[0] != '\0') ? g_enroll_target_acc : g_screen5_found_acc;
+            g_nfc_enroll_result = (bind_acc[0] != '\0' && users_bind_nfc_by_acc(bind_acc, card_id)) ? 1u : 0u;
         } else {
             int owner;
 

@@ -4,12 +4,10 @@
 /* Cloud switch: set to 1 to enable WiFi/MQTT (无固件 OTA)。 */
 #define APP_CLOUD_ENABLE 1
 
-/* 1=DX-WF24-A (BK7238)；0=ESP8266。见 app_wifi_modem.h */
-#ifndef APP_WIFI_MODEM_WF24
+/* 硬件固定 DX-WF24-A (BK7238)，见 app_wifi_modem.h */
 #define APP_WIFI_MODEM_WF24  1
-#endif
 
-/* Aliyun MQTT：USART2 PA2/PA3；WF24 时 PE12→模块 KEY，ESP 时 PA8→RST */
+/* Aliyun MQTT：USART2 PA2/PA3；PE12→模块 KEY */
 #define APP_ALIYUN_AT_ENABLE 1
 #ifndef APP_ALIYUN_UART_BAUD
 #define APP_ALIYUN_UART_BAUD     115200u
@@ -63,6 +61,10 @@
 
 /* RS485 主从协议：暂时关闭（DI_485 仍可用于调试日志，见 APP_DEBUG_VIA_RS485） */
 #define APP_RS485_ENABLE         0
+/* 0=关闭所有调试口输出（usart_debug / printf）；1=允许按下列开关输出 */
+#ifndef APP_DEBUG_LOG_ENABLE
+#define APP_DEBUG_LOG_ENABLE     1
+#endif
 /* 1=调试口 USART6 PC6(TX)/PC7(RX)；0=USART1 PA9/PA10 */
 #ifndef APP_DEBUG_ON_USART6
 #define APP_DEBUG_ON_USART6      0
@@ -76,13 +78,13 @@
 #endif
 /* 0=仅手动选热点+输密码连接；1=进 WiFi 页按 Flash 记忆自动连 */
 #ifndef APP_WIFI_AUTO_CONNECT_ENABLE
-#define APP_WIFI_AUTO_CONNECT_ENABLE  1
+#define APP_WIFI_AUTO_CONNECT_ENABLE  0
 #endif
-/* 1=仅输出 [WiFi] 扫描/UI 串口日志（会链入 vsnprintf，Flash 紧张请关） */
+/* 1=仅输出 [WiFi] 扫描/UI/CWJAP 串口日志（含 CWLAP 列表 dump，排障开） */
 #ifndef APP_WIFI_UART_DEBUG
 #define APP_WIFI_UART_DEBUG      0
 #endif
-/* 1=CWJAP 关键步骤固定串口日志（不占 printf，Flash 紧张保持 0） */
+/* 1=CWJAP 逐步日志；0=仅 APP_LOG_ESSENTIAL 成败一行 */
 #ifndef APP_WIFI_CWJAP_TRACE
 #define APP_WIFI_CWJAP_TRACE     0
 #endif
@@ -97,9 +99,9 @@
 #ifndef APP_LCD_SKIP_BOOT_CLEAR
 #define APP_LCD_SKIP_BOOT_CLEAR  1   /* ui_v3：跳过 lcd_init 全屏白，省一次 SPI 刷屏 */
 #endif
-/* 0=调试 USART1 PA9；1=仅 RS485 H11 日志（与 GitHub 默认 PA9 不同） */
+/* 0=调试 USART1 PA9；1=调试走 H11 DI_485（USART6 PC6 TX + PC8 DE），与 test 自检一致 */
 #ifndef APP_DEBUG_VIA_RS485
-#define APP_DEBUG_VIA_RS485      0
+#define APP_DEBUG_VIA_RS485      1
 #endif
 /* 1=任务启动后打印栈余量 [RTOS] stack HWM task=... */
 #ifndef APP_RTOS_STACK_DIAG
@@ -109,13 +111,9 @@
 #define APP_RTOS_STACK_DIAG      0
 #endif
 #endif
-/* 1=启动阶段 [BOOT] 串口日志（白屏/卡死时看 PA9 115200 停在哪一步） */
+/* 1=启动阶段 [BOOT] 串口日志；WiFi 排障时关，避免刷屏 */
 #ifndef APP_BOOT_STAGE_LOG
-#if (APP_HOST_HW_SELFTEST != 0)
 #define APP_BOOT_STAGE_LOG  0
-#else
-#define APP_BOOT_STAGE_LOG  1
-#endif
 #endif
 /* LCD SPI / 自检（与 modelkey3 一致；HW_TEST=0 不刷色带） */
 #ifndef APP_LCD_HW_TEST
@@ -202,9 +200,9 @@
 #ifndef APP_HOST_RS485_LOG_VERBOSE
 #define APP_HOST_RS485_LOG_VERBOSE 0
 #endif
-/* 1: 仅从机开锁经主机上报云端 链路日志（账号/指纹/NFC） */
+/* 1=仅从机开锁经主机上报云端链路日志 */
 #ifndef APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE
-#define APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE 0
+#define APP_HOST_SLAVE_UNLOCK_CLOUD_TRACE 1
 #endif
 /* 发完一帧后等待从机切换 DE/RE 再收应答 */
 #ifndef APP_RS485_POST_TX_GAP_MS
@@ -261,19 +259,21 @@
 #define APP_SLAVE_LOG_VERBOSE 0
 #endif
 /*
- * 云端日志（均走 usart_debug_tx_str，勿开 APP_CLOUD_UART_DEBUG=1，会链入 printf 导致 Flash 溢出）
- * - APP_CLOUD_TRACE：MQTT 建链/在线 [CLOUD] ...
- * - APP_TIME_TRACE：NTP 校时 [TIME] ...
- * - APP_CLOUD_COMMAND_TRACE：terminal/get 桥接 [CLOUD][CMD]/[CLOUD][BIND]
+ * 云端/时间/开锁上报（DI_485 H11 PC6 115200）：
+ * LOG_ESSENTIAL  → [WiFi] connected / [TIME] sync ok / [CLOUD] online / [UNLOCK] upload fail
+ * CLOUD_TRACE    → MQTT session；TIME_TRACE → NTP；UNLOCK_CLOUD_TRACE → 上报队列/发布
  */
+#ifndef APP_LOG_ESSENTIAL
+#define APP_LOG_ESSENTIAL        1
+#endif
 #ifndef APP_CLOUD_UART_DEBUG
 #define APP_CLOUD_UART_DEBUG     0
 #endif
 #ifndef APP_CLOUD_TRACE
-#define APP_CLOUD_TRACE          0
+#define APP_CLOUD_TRACE          1
 #endif
 #ifndef APP_CLOUD_CONNECT_DIAG
-#define APP_CLOUD_CONNECT_DIAG   0
+#define APP_CLOUD_CONNECT_DIAG   1
 #endif
 #ifndef APP_CLOUD_COMMAND_ENABLE
 #define APP_CLOUD_COMMAND_ENABLE 1
@@ -282,7 +282,7 @@
 #define APP_CLOUD_COMMAND_TRACE  0
 #endif
 #ifndef APP_TIME_TRACE
-#define APP_TIME_TRACE           0
+#define APP_TIME_TRACE           0   /* 1=SNTP 逐步日志，易刷屏卡 UI；成败见 LOG_ESSENTIAL */
 #endif
 /* 1: WiFi 已连则 MQTT 长连，不主动 CIPCLOSE；仍须 PINGREQ 保活（见 cloud_aliyun_at） */
 #ifndef APP_CLOUD_PERSISTENT_MQTT
@@ -292,13 +292,9 @@
 #ifndef APP_CLOUD_FAST_AFTER_WIFI_JOIN
 #define APP_CLOUD_FAST_AFTER_WIFI_JOIN  1
 #endif
-/* 1: 关闭 cloud_aliyun_at.c 内 printf（调试时由 APP_CLOUD_UART_DEBUG 强制打开） */
+/* 1: 关闭 cloud_aliyun_at 内 printf（[ALIYUN]/MQTT）；WiFi 仅走 usart_debug [WiFi] */
 #ifndef APP_HOST_SILENCE_ALIYUN_TERMINAL
-#if (APP_CLOUD_UART_DEBUG != 0) || (APP_WIFI_UART_DEBUG != 0) || (APP_CLOUD_TRACE != 0)
-#define APP_HOST_SILENCE_ALIYUN_TERMINAL 0
-#else
-#define APP_HOST_SILENCE_ALIYUN_TERMINAL 1
-#endif
+#define APP_HOST_SILENCE_ALIYUN_TERMINAL  1
 #endif
 
 /* 默认管理员（screen_2 登录）初始字符串 */

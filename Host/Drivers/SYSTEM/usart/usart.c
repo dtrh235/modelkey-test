@@ -30,6 +30,10 @@
 #if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 1)
 #include "app_rs485_link.h"
 #endif
+#if (APP_USE_FREERTOS == 1)
+#include "FreeRTOS.h"
+#include "semphr.h"
+#endif
 
 #if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 0)
 #define DBG_RS485_DE_PORT   GPIOC
@@ -85,13 +89,16 @@ static void dbg_rs485_tx(const uint8_t *data, uint16_t len)
         return;
     }
     dbg_rs485_de_tx();
-    (void)HAL_UART_Transmit(&s_dbg_rs485_uart, (uint8_t *)data, len, 500u);
+    (void)HAL_UART_Transmit(&s_dbg_rs485_uart, (uint8_t *)data, len, 150u);
     dbg_rs485_de_rx();
 }
 #endif
 
 static UART_HandleTypeDef g_uart_dbg_handle = {0};  /* printf / usart_debug_tx_str */
 static uint8_t g_uart_dbg_inited = 0u;
+#if (APP_USE_FREERTOS == 1)
+static SemaphoreHandle_t s_dbg_tx_mutex = NULL;
+#endif
 #define AS608_UART_BAUDRATE 57600u
 
 static void usart_debug_init(uint32_t baudrate)
@@ -138,7 +145,14 @@ static void usart_debug_init(uint32_t baudrate)
 
 void usart_debug_tx_str(const char *s)
 {
+#if (APP_DEBUG_LOG_ENABLE == 0)
+    (void)s;
+    return;
+#endif
     size_t n;
+#if (APP_USE_FREERTOS == 1)
+    uint8_t took = 0u;
+#endif
 
     if(s == NULL) {
         return;
@@ -147,21 +161,50 @@ void usart_debug_tx_str(const char *s)
     if(n > 400u) {
         n = 400u;
     }
+#if (APP_USE_FREERTOS == 1)
+    if(s_dbg_tx_mutex == NULL && xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+        s_dbg_tx_mutex = xSemaphoreCreateMutex();
+    }
+    if(s_dbg_tx_mutex != NULL &&
+       xSemaphoreTake(s_dbg_tx_mutex, pdMS_TO_TICKS(120u)) == pdTRUE) {
+        took = 1u;
+    }
+#endif
 #if (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 1)
     if(app_rs485_link_ready() != 0u) {
         (void)app_rs485_raw_send((const uint8_t *)s, (uint16_t)n, 500u);
+#if (APP_USE_FREERTOS == 1)
+        if(took != 0u) {
+            (void)xSemaphoreGive(s_dbg_tx_mutex);
+        }
+#endif
         return;
     }
 #elif (APP_DEBUG_VIA_RS485 != 0) && (APP_RS485_ENABLE == 0)
     if(s_dbg_rs485_ok != 0u) {
         dbg_rs485_tx((const uint8_t *)s, (uint16_t)n);
+#if (APP_USE_FREERTOS == 1)
+        if(took != 0u) {
+            (void)xSemaphoreGive(s_dbg_tx_mutex);
+        }
+#endif
         return;
     }
 #endif
     if(g_uart_dbg_inited == 0u) {
+#if (APP_USE_FREERTOS == 1)
+        if(took != 0u) {
+            (void)xSemaphoreGive(s_dbg_tx_mutex);
+        }
+#endif
         return;
     }
     (void)HAL_UART_Transmit(&g_uart_dbg_handle, (uint8_t *)s, (uint16_t)n, 80u);
+#if (APP_USE_FREERTOS == 1)
+    if(took != 0u) {
+        (void)xSemaphoreGive(s_dbg_tx_mutex);
+    }
+#endif
 }
 
 /* ??????os,?????????????????? */
@@ -215,6 +258,10 @@ FILE __stdout;
 /* ?????fputc????, printf????????????????fputc?????????????? */
 int fputc(int ch, FILE *f)
 {
+#if (APP_DEBUG_LOG_ENABLE == 0)
+    (void)f;
+    return ch;
+#endif
     USART_TypeDef *uartx = g_uart_dbg_inited ? g_uart_dbg_handle.Instance : g_uart1_handle.Instance;
     if(uartx == NULL) return ch;
     while((uartx->SR & USART_SR_TXE) == 0u) {

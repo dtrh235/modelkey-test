@@ -6,15 +6,29 @@
 #include "app_screen8_popup.h"
 #include "app_screen8_flow.h"
 #include "lvgl.h"
+#if (APP_UI_V3_ENABLE == 1)
+#include "app_ui_v3_services.h"
+#endif
 
 void enter_screen_wifi(void) {}
 void screen_wifi_prepare_on_enter(void) {}
 void screen_wifi_poll_tick(void) {}
 void screen_wifi_gui_wake(void) {}
 uint8_t screen_wifi_gui_work_pending(void) { return 0u; }
+#if (APP_UI_V3_ENABLE == 1)
+void screen_wifi_notify_sta_up(void)
+{
+    ui3_wifi_notify_sta_up();
+}
+void screen_wifi_notify_connect_fail(void)
+{
+    ui3_wifi_notify_connect_fail();
+}
+#else
 void screen_wifi_notify_sta_up(void) {}
-void screen_wifi_notify_sta_down(void) {}
 void screen_wifi_notify_connect_fail(void) {}
+#endif
+void screen_wifi_notify_sta_down(void) {}
 void screen_wifi_notify_scan_start(void) {}
 void screen_wifi_notify_scan_done(void) {}
 uint8_t screen_wifi_popup_is_active(void) { return 0u; }

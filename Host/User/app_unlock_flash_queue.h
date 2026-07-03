@@ -19,6 +19,10 @@ void app_unlock_flash_append_bridge_done(const char *account, uint8_t method_cod
 /** 物模型 post 确认后删除对应 seq（防 Flash 重复补发） */
 void app_unlock_flash_drop_seq(uint32_t seq);
 
+/** StorageTask 注册后，上传成功可异步落盘 */
+void app_unlock_flash_bind_storage_task(void *task_handle);
+uint8_t app_unlock_flash_flush_if_dirty(void);
+
 /* 1=已上传可删 0=无记录/失败 */
 uint8_t app_unlock_flash_upload_next(int (*publish_fn)(const char *json, void *ctx), void *ctx);
 uint8_t app_unlock_flash_upload_next_property(int (*publish_fn)(const char *json, void *ctx),

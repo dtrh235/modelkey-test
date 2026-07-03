@@ -11,12 +11,11 @@
 #define configTICK_RATE_HZ                      ( ( unsigned long ) 1000 )
 #define configMAX_PRIORITIES                    6
 #define configMINIMAL_STACK_SIZE                ( ( unsigned short ) 128 )
-/* ui_v3+CloudTask(5120w) 共 6 任务栈约 48KB+TCB；48KB 堆会创建失败→首帧后卡死 */
-#define configTOTAL_HEAP_SIZE                   ( ( size_t ) ( 60 * 1024 ) )
+#define configTOTAL_HEAP_SIZE                   ( ( size_t ) ( 48 * 1024 ) )
 #define configMAX_TASK_NAME_LEN                 16
 #define configUSE_16_BIT_TICKS                  0
 #define configUSE_MUTEXES                       1
-#define configUSE_RECURSIVE_MUTEXES             0
+#define configUSE_RECURSIVE_MUTEXES             1
 #define configUSE_COUNTING_SEMAPHORES           0
 #define configQUEUE_REGISTRY_SIZE               0
 #define configUSE_QUEUE_SETS                    0
