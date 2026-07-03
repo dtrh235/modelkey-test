@@ -28,6 +28,7 @@ static uint8_t s_wifi_modal_on;
 static char s_pair_status[48];
 static uint32_t s_wifi_scan_ui_since_ms;
 static volatile uint8_t s_wifi_pending_sta_up;
+static volatile uint8_t s_wifi_pending_sta_down;
 static volatile uint8_t s_wifi_pending_connect_fail;
 
 static void ui3_wifi_connect_ok_ui(ui3_state_t *st)
@@ -75,6 +76,11 @@ void ui3_wifi_notify_connect_fail(void)
     s_wifi_pending_connect_fail = 1u;
 }
 
+void ui3_wifi_notify_sta_down(void)
+{
+    s_wifi_pending_sta_down = 1u;
+}
+
 uint8_t ui3_wifi_scan_ui_active(ui3_state_t *st)
 {
     uint32_t now;
@@ -119,6 +125,7 @@ static uint8_t wifi_rssi_to_bars(int8_t rssi)
 void ui3_services_sync_cloud(ui3_state_t *st)
 {
     uint8_t online;
+    uint8_t wifi_still_up;
     static uint32_t s_cloud_seen_ms;
     uint32_t now;
 
@@ -126,10 +133,25 @@ void ui3_services_sync_cloud(ui3_state_t *st)
         return;
     }
     now = HAL_GetTick();
-    if(app_pair_cloud_ready() != 0u) {
+    wifi_still_up = (uint8_t)(cloud_aliyun_at_wifi_link_ready() != 0u ||
+                              cloud_aliyun_at_wifi_ui_up() != 0u);
+    if(s_wifi_pending_sta_down != 0u) {
+        s_wifi_pending_sta_down = 0u;
+        s_cloud_seen_ms = 0u;
+        online = 0u;
+    } else if(cloud_aliyun_at_wifi_ui_up() == 0u &&
+              cloud_aliyun_at_wifi_was_up() != 0u) {
+        s_cloud_seen_ms = 0u;
+        online = 0u;
+    } else if(wifi_still_up == 0u) {
+        s_cloud_seen_ms = 0u;
+        online = 0u;
+    } else if(app_pair_cloud_ready() != 0u && cloud_aliyun_at_wifi_ui_up() != 0u) {
         s_cloud_seen_ms = now;
         online = 1u;
-    } else if(s_cloud_seen_ms != 0u && (now - s_cloud_seen_ms) < 20000u) {
+    } else if(s_cloud_seen_ms != 0u && (now - s_cloud_seen_ms) < 20000u &&
+              cloud_aliyun_at_wifi_link_ready() != 0u &&
+              cloud_aliyun_at_wifi_ui_up() != 0u) {
         /* MQTT 发 CIPSEND 时 step 会短暂离开 ONLINE，避免顶栏闪「离线」 */
         online = 1u;
     } else {

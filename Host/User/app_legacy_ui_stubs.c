@@ -24,11 +24,15 @@ void screen_wifi_notify_connect_fail(void)
 {
     ui3_wifi_notify_connect_fail();
 }
+void screen_wifi_notify_sta_down(void)
+{
+    ui3_wifi_notify_sta_down();
+}
 #else
 void screen_wifi_notify_sta_up(void) {}
 void screen_wifi_notify_connect_fail(void) {}
-#endif
 void screen_wifi_notify_sta_down(void) {}
+#endif
 void screen_wifi_notify_scan_start(void) {}
 void screen_wifi_notify_scan_done(void) {}
 uint8_t screen_wifi_popup_is_active(void) { return 0u; }

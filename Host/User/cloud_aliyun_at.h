@@ -9,6 +9,7 @@ void cloud_aliyun_at_init(void);
 void cloud_aliyun_at_poll_5ms(void);
 /* 1=曾连上 WiFi（STA 有 IP） */
 uint8_t cloud_aliyun_at_wifi_was_up(void);
+uint8_t cloud_aliyun_at_wifi_ui_up(void);
 /* 1=允许跑 cloud poll：在 WiFi 页，或已经连过 WiFi */
 uint8_t cloud_aliyun_at_poll_allowed(uint8_t on_wifi_scr);
 /* 进入/离开 WiFi 设置页：暂停 MQTT 占用 UART2，便于 CWLAP */

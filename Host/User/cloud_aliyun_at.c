@@ -282,6 +282,7 @@ static uint8_t s_cipsend_retry_cnt = 0u;
 static uint8_t s_scr11_mqtt_paused = 0u;
 static aliyun_step_t s_scr11_resume_step = ALIYUN_STEP_IDLE;
 static uint8_t s_wifi_sta_ip_ok = 0u;
+static volatile uint8_t s_wifi_ui_up = 0u;
 static uint8_t s_wifi_ip_verify_pending = 0u;
 static uint8_t s_wifi_ever_up = 0u;
 static volatile uint8_t s_user_wifi_join_st = 0u; /* 0 idle 1 pending 2 ok 3 fail */
@@ -436,6 +437,9 @@ static uint8_t modem_wifi_got_ip_in_rx(void);
 #define WF24_MQTT_WAIT_FAST_MS          4500u
 #define WF24_SNTP_POLL_MS               30000u
 #define WF24_SNTP_QUERY_GAP_MS          2000u
+#define WF24_SNTP_ONLINE_QUERY_MS       700u
+#define WF24_SNTP_POST_ONLINE_WAIT_MS   150u
+#define WF24_NTP_FINISH_AT_ONLINE_MS    800u
 #else
 #define ALIYUN_MQTT_POST_JOIN_CIPSTART_MS 200u
 #endif
@@ -498,6 +502,9 @@ static void add_hours_to_datetime(int *y, int *mo, int *d, int *h, int add_h)
     *h = hh;
 }
 
+static void cloud_aliyun_at_wifi_ui_mark_up(void);
+static void cloud_aliyun_at_wifi_ui_mark_down(void);
+
 static uint8_t aliyun_ensure_sta_ip(void)
 {
 #if (APP_WIFI_MODEM_WF24 != 0)
@@ -521,6 +528,7 @@ static uint8_t aliyun_ensure_sta_ip(void)
     if(st == 2u) {
         s_wifi_sta_ip_ok = 1u;
         s_wifi_ever_up = 1u;
+        cloud_aliyun_at_wifi_ui_mark_up();
         if(ssid_live[0] != '\0') {
             strncpy(s_connected_sta_ssid, ssid_live, sizeof(s_connected_sta_ssid) - 1u);
             s_connected_sta_ssid[sizeof(s_connected_sta_ssid) - 1u] = '\0';
@@ -990,6 +998,22 @@ static uint8_t sntp_try_parse_line(const char *p)
     return 0u;
 }
 
+/** 解析 RX 已有 +CIPSNTPTIME（NETWORK TIME SUCCESS 后模组可能已上报） */
+static uint8_t sntp_try_parse_rx_win(void)
+{
+    const char *p;
+
+    if(s_sntp_synced != 0u || s_ntp_synced != 0u || app_wall_clock_valid() != 0u) {
+        return 1u;
+    }
+    p = sntp_find_last_line(s_rx_win);
+    if(p != NULL && sntp_try_parse_line(p) != 0u) {
+        s_sntp_empty_cnt = 0u;
+        return 1u;
+    }
+    return 0u;
+}
+
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
 static uint8_t cloud_aliyun_sntp_step_active(void)
 {
@@ -1015,22 +1039,30 @@ static void sntp_uart_pump(uint32_t duration_ms)
 }
 #endif
 
-/* r110：短查询，清 RX 后读 +CIPSNTPTIME */
-static uint8_t aliyun_try_fetch_sntp_once(void)
+/* r110：短查询，清 RX 后读 +CIPSNTPTIME；online 首查用 WF24_SNTP_ONLINE_QUERY_MS */
+static uint8_t aliyun_try_fetch_sntp_once_ms(uint32_t query_ms)
 {
     char *p;
+    uint32_t fallback_ms;
 
     if(s_prop_post_awaiting != 0u) {
         return 0u;
     }
+    if(sntp_try_parse_rx_win() != 0u) {
+        return 1u;
+    }
+    if(query_ms < 200u) {
+        query_ms = 200u;
+    }
+    fallback_ms = (query_ms > 400u) ? 400u : query_ms;
     cloud_uart2_rx_clear();
     s_sntp_query_start_ms = HAL_GetTick();
     if(!uart2_send_text("AT+CIPSNTPTIME?\r\n")) {
         TIME_TRACE_MSG("[TIME]Esf\r\n");
         return 0u;
     }
-    if(!uart2_wait_text("+CIPSNTPTIME:", ALIYUN_SNTP_QUERY_MS) &&
-       !uart2_wait_text("+CIPSNTP:", 400u)) {
+    if(!uart2_wait_text("+CIPSNTPTIME:", query_ms) &&
+       !uart2_wait_text("+CIPSNTP:", fallback_ms)) {
         if(strstr(s_rx_win, "ERROR") != NULL) {
             TIME_TRACE_MSG("[TIME]Eer\r\n");
         } else {
@@ -1050,6 +1082,11 @@ static uint8_t aliyun_try_fetch_sntp_once(void)
     s_sntp_empty_cnt++;
     time_trace_ebd_maybe();
     return 0u;
+}
+
+static uint8_t aliyun_try_fetch_sntp_once(void)
+{
+    return aliyun_try_fetch_sntp_once_ms(ALIYUN_SNTP_QUERY_MS);
 }
 
 #if (APP_WIFI_MODEM_WF24 != 0)
@@ -1098,27 +1135,77 @@ static void wf24_modem_sntp_kick(void)
     LOG_ESSENTIAL("[TIME] SNTP query start\r\n");
 }
 
-/** MQTT online 后立刻 cfg+首查（勿等 post_reply 订阅 / poll 间隔） */
+/** MQTT online 后被动解析（勿占 UART 发 AT / NTP，prop_reply 优先） */
 static uint8_t wf24_modem_sntp_online_fast_sync(void)
 {
     if(s_sntp_synced != 0u || s_ntp_synced != 0u || app_wall_clock_valid() != 0u) {
         return 1u;
     }
-    if(s_wf24_sntp_active == 0u) {
-        wf24_modem_sntp_kick();
+    if(sntp_try_parse_rx_win() != 0u) {
+        s_wf24_sntp_active = 0u;
+        s_wf24_sntp_retry_ms = 0u;
+        return 1u;
     }
     if(s_sntp_cfg_sent == 0u) {
         wf24_sntp_cfg_once_before_mqtt();
     }
-    if(s_sntp_cfg_sent != 0u) {
-        s_wf24_sntp_last_ms = HAL_GetTick();
-        if(aliyun_try_fetch_sntp_once() != 0u) {
+    if(s_sntp_cfg_sent == 0u) {
+        return 0u;
+    }
+    if(sntp_try_parse_rx_win() != 0u) {
+        s_wf24_sntp_active = 0u;
+        s_wf24_sntp_retry_ms = 0u;
+        return 1u;
+    }
+    return 0u;
+}
+
+/** prop_reply 完成后：等 NETWORK TIME URC，再 SNTP 首查；失败才走 MQTT-NTP */
+static uint8_t wf24_modem_sntp_post_online_sync(void)
+{
+    uint32_t t0;
+
+    if(s_sntp_synced != 0u || s_ntp_synced != 0u || app_wall_clock_valid() != 0u) {
+        return 1u;
+    }
+    if(s_sntp_cfg_sent == 0u) {
+        wf24_sntp_cfg_once_before_mqtt();
+    }
+    if(s_sntp_cfg_sent == 0u) {
+        return 0u;
+    }
+    if(sntp_try_parse_rx_win() != 0u) {
+        s_wf24_sntp_active = 0u;
+        s_wf24_sntp_retry_ms = 0u;
+        return 1u;
+    }
+    t0 = HAL_GetTick();
+    while((HAL_GetTick() - t0) < WF24_SNTP_POST_ONLINE_WAIT_MS) {
+        uart2_pump_rx_core(25u, 1u);
+        if(sntp_try_parse_rx_win() != 0u) {
             s_wf24_sntp_active = 0u;
             s_wf24_sntp_retry_ms = 0u;
-            LOG_ESSENTIAL("[TIME] sync ok\r\n");
-            cloud_aliyun_at_time_sync_done();
             return 1u;
         }
+        if(strstr(s_rx_win, "NETWORK TIME") != NULL ||
+           strstr(s_rx_win, "+CIPSNTPTIME:") != NULL) {
+            break;
+        }
+    }
+    if(strstr(s_rx_win, "NETWORK TIME") == NULL &&
+       strstr(s_rx_win, "+CIPSNTPTIME:") == NULL) {
+        return 0u;
+    }
+    if(s_wf24_sntp_active == 0u) {
+        wf24_modem_sntp_kick();
+    }
+    s_wf24_sntp_last_ms = HAL_GetTick();
+    if(aliyun_try_fetch_sntp_once_ms(WF24_SNTP_ONLINE_QUERY_MS) != 0u) {
+        s_wf24_sntp_active = 0u;
+        s_wf24_sntp_retry_ms = 0u;
+        LOG_ESSENTIAL("[TIME] sync ok\r\n");
+        cloud_aliyun_at_time_sync_done();
+        return 1u;
     }
     return 0u;
 }
@@ -1164,6 +1251,11 @@ static void wf24_modem_sntp_poll(void)
     if(strstr(s_rx_win, "NETWORK TIME") != NULL ||
        strstr(s_rx_win, "NETWORK TIME SUCC") != NULL) {
         cloud_uart2_hw_drain_ms(100u);
+    }
+    if(sntp_try_parse_rx_win() != 0u) {
+        s_wf24_sntp_active = 0u;
+        s_wf24_sntp_retry_ms = 0u;
+        return;
     }
     if(aliyun_try_fetch_sntp_once() != 0u) {
         s_wf24_sntp_active = 0u;
@@ -2805,11 +2897,23 @@ static uint8_t wf24_boot_try_reuse_saved_wifi(void)
     s_wifi_sta_ip_ok = 1u;
     s_wifi_ever_up = 1u;
     s_wifi_got_ip_ms = HAL_GetTick();
+    cloud_aliyun_at_wifi_ui_mark_up();
     LOG_ESSENTIAL("[WiFi] connected\r\n");
     app_wifi_cfg_clear_reconnect_request();
     cloud_aliyun_at_mqtt_kick_after_wifi();
     s_step = ALIYUN_STEP_WIFI_IDLE;
     return 1u;
+}
+
+static void cloud_aliyun_at_wifi_ui_mark_up(void)
+{
+    s_wifi_ui_up = 1u;
+}
+
+static void cloud_aliyun_at_wifi_ui_mark_down(void)
+{
+    s_wifi_ui_up = 0u;
+    screen_wifi_notify_sta_down();
 }
 
 static uint8_t wf24_mqtt_connected_in_rx(void)
@@ -3709,6 +3813,7 @@ void cloud_aliyun_at_init(void)
     s_step = (s_modem_at_ok != 0u) ? ALIYUN_STEP_WIFI_IDLE : ALIYUN_STEP_AT;
     s_wifi_ever_up = 0u;
     s_wifi_sta_ip_ok = 0u;
+    s_wifi_ui_up = 0u;
     s_wf24_cwstate_query_ms = 0u;
     s_step_ms = HAL_GetTick();
     s_last_step_log = ALIYUN_STEP_IDLE;
@@ -3787,6 +3892,15 @@ uint8_t cloud_aliyun_at_wifi_was_up(void)
 {
 #if (APP_ALIYUN_AT_ENABLE == 1)
     return s_wifi_ever_up;
+#else
+    return 0u;
+#endif
+}
+
+uint8_t cloud_aliyun_at_wifi_ui_up(void)
+{
+#if (APP_ALIYUN_AT_ENABLE == 1)
+    return s_wifi_ui_up;
 #else
     return 0u;
 #endif
@@ -5963,6 +6077,7 @@ static void cloud_aliyun_at_wifi_link_lost(const char *reason)
 
     /* 无论是否重复 URC，先清 STA/云端同步标志，避免 scr11 误显「已连接」 */
     s_wifi_sta_ip_ok = 0u;
+    s_wifi_ui_up = 0u;
     s_wifi_ip_verify_pending = 0u;
     s_wifi_got_ip_ms = 0u;
     s_wf24_cwstate_query_ms = 0u;
@@ -6050,7 +6165,7 @@ static void cloud_aliyun_at_wifi_link_lost(const char *reason)
     cloud_uart2_rx_clear();
 }
 
-static uint8_t cloud_aliyun_at_wifi_disconnect_urc_valid(void)
+static uint8_t cloud_aliyun_at_wifi_disconnect_urc_common(uint8_t apply_grace)
 {
     const char *disc;
     const char *got_ip;
@@ -6062,26 +6177,32 @@ static uint8_t cloud_aliyun_at_wifi_disconnect_urc_valid(void)
     if(s_user_wifi_join_st == 1u || s_step == ALIYUN_STEP_CWJAP_SET) {
         return 0u;
     }
-#if (APP_ALIYUN_SNTP_ENABLE == 1)
-    if(cloud_aliyun_sntp_step_active() != 0u) {
-        return 0u;
-    }
-#endif
     got_ip = strstr(s_rx_win, "WIFI GOT IP");
     disc = strstr(s_rx_win, "WIFI DISCONNECT");
-    if(got_ip != NULL && disc != NULL && got_ip < disc) {
+    if(got_ip != NULL && disc != NULL && got_ip > disc) {
         return 0u;
     }
-    if(s_wifi_sta_ip_ok != 0u && s_wifi_got_ip_ms != 0u &&
-       (HAL_GetTick() - s_wifi_got_ip_ms) < WIFI_DISCONNECT_GRACE_MS) {
-        return 0u;
+    if(apply_grace != 0u) {
+#if (APP_ALIYUN_SNTP_ENABLE == 1)
+        if(cloud_aliyun_sntp_step_active() != 0u) {
+            return 0u;
+        }
+#endif
+        if(s_wifi_sta_ip_ok != 0u && s_wifi_got_ip_ms != 0u &&
+           (HAL_GetTick() - s_wifi_got_ip_ms) < WIFI_DISCONNECT_GRACE_MS) {
+            return 0u;
+        }
     }
-    /* CWLAP 残留里的 DISCONNECT 字样不是真实掉线 */
     cwlap = strstr(s_rx_win, "+CWLAP");
     if(cwlap != NULL && disc != NULL && cwlap < disc) {
         return 0u;
     }
     return 1u;
+}
+
+static uint8_t cloud_aliyun_at_wifi_disconnect_urc_valid(void)
+{
+    return cloud_aliyun_at_wifi_disconnect_urc_common(1u);
 }
 
 static void cloud_aliyun_at_poll_wifi_urc(void)
@@ -6090,8 +6211,12 @@ static void cloud_aliyun_at_poll_wifi_urc(void)
         return;
     }
     uart2_pump_rx_core(20u, 1u);
-    if(cloud_uart2_rx_has("WIFI GOT IP") != 0) {
+    if(cloud_uart2_rx_has("WIFI DISCONNECT") == 0) {
         return;
+    }
+    /* 顶栏：DISCONNECT 立即 mark_down（勿等 10s MQTT teardown grace） */
+    if(cloud_aliyun_at_wifi_disconnect_urc_common(0u) != 0u) {
+        cloud_aliyun_at_wifi_ui_mark_down();
     }
     if(cloud_aliyun_at_wifi_disconnect_urc_valid() == 0u) {
         return;
@@ -7542,6 +7667,7 @@ void cloud_aliyun_at_poll_5ms(void)
                 break;
             }
             CWJAP_TRACE_MSG("[WiFi] CWJAP IP ok\r\n");
+            cloud_aliyun_at_wifi_ui_mark_up();
             LOG_ESSENTIAL("[WiFi] connected\r\n");
             cloud_uart2_copy_cwjap_ssid(s_connected_sta_ssid, (uint16_t)sizeof(s_connected_sta_ssid));
             if(s_connected_sta_ssid[0] == '\0' && joined_ssid != NULL && joined_ssid[0] != '\0') {
@@ -7686,6 +7812,7 @@ void cloud_aliyun_at_poll_5ms(void)
             s_wifi_sta_ip_ok = 1u;
             s_wifi_ever_up = 1u;
             s_wifi_got_ip_ms = HAL_GetTick();
+            cloud_aliyun_at_wifi_ui_mark_up();
             LOG_ESSENTIAL("[WiFi] connected\r\n");
             if(s_connected_sta_ssid[0] == '\0') {
                 const char *cfg_ssid = app_wifi_cfg_get_ssid();
@@ -8091,30 +8218,8 @@ void cloud_aliyun_at_poll_5ms(void)
 #endif
             printf("[ALIYUN] MQTT connected (CONNACK OK) -> cloud online\r\n");
             CLOUD_TRACE_MSG("[CLOUD] MQTT online ok\r\n");
-            LOG_ESSENTIAL("[CLOUD] online\r\n");
-#if (APP_WIFI_MODEM_WF24 != 0) && (APP_ALIYUN_SNTP_ENABLE == 1)
-            if(wf24_modem_sntp_online_fast_sync() == 0u) {
-                (void)aliyun_ntp_try_sync_online();
-            }
-#endif
-            aliyun_prop_reply_ensure_subscribed();
-#if (APP_WIFI_MODEM_WF24 != 0) && (APP_ALIYUN_SNTP_ENABLE == 1)
-            if(s_sntp_synced == 0u && s_ntp_synced == 0u && app_wall_clock_valid() == 0u &&
-               s_wf24_sntp_active == 0u) {
-                wf24_modem_sntp_kick();
-            }
-#endif
-            aliyun_ntp_reset_bridge_wait();
-#if (APP_CLOUD_COMMAND_ENABLE != 0)
-            app_cloud_command_reset();
-#endif
-            /* 勿清空物模型重试队列：桥接已发出时会导致主机本地开锁阿里云缺记录 */
-            cloud_ota_service_on_mqtt_online();
 #if (APP_ALIYUN_SNTP_ENABLE == 1)
-            if(s_ntp_connect_tried == 0u) {
-                s_ntp_connect_tried = 1u;
-            }
-#endif
+            /* 先清 NTP 会话，再校时；勿在 ntp_try 之后清零（晚开 WiFi 会双 NTP start） */
             s_ntp_sub_sess = 0u;
             s_ntp_sub_ok = 0u;
             s_ntp_sub_pkt_id = 0u;
@@ -8127,6 +8232,37 @@ void cloud_aliyun_at_poll_5ms(void)
 #if (APP_TIME_TRACE != 0)
             s_ntp_suback_logged = 0u;
             s_ntp_pend_diag_ms = 0u;
+#endif
+#endif
+            LOG_ESSENTIAL("[CLOUD] online\r\n");
+#if (APP_WIFI_MODEM_WF24 != 0) && (APP_ALIYUN_SNTP_ENABLE == 1)
+            (void)wf24_modem_sntp_online_fast_sync();
+#endif
+            aliyun_prop_reply_ensure_subscribed();
+            aliyun_ntp_reset_bridge_wait();
+#if (APP_CLOUD_COMMAND_ENABLE != 0)
+            app_cloud_command_reset();
+#endif
+            cloud_ota_service_on_mqtt_online();
+#if (APP_WIFI_MODEM_WF24 != 0) && (APP_ALIYUN_SNTP_ENABLE == 1)
+            if(s_ntp_synced == 0u && s_sntp_synced == 0u && app_wall_clock_valid() == 0u) {
+                uint32_t t_fin;
+
+                if(wf24_modem_sntp_post_online_sync() == 0u) {
+                    s_wf24_sntp_active = 0u;
+                    s_wf24_sntp_retry_ms = 0u;
+                    t_fin = HAL_GetTick();
+                    while((HAL_GetTick() - t_fin) < WF24_NTP_FINISH_AT_ONLINE_MS) {
+                        if(s_ntp_synced != 0u || s_sntp_synced != 0u ||
+                           app_wall_clock_valid() != 0u) {
+                            break;
+                        }
+                        (void)aliyun_ntp_try_sync_online();
+                        uart2_pump_rx_core(25u, 1u);
+                        (void)aliyun_ntp_try_parse_any();
+                    }
+                }
+            }
 #endif
             if(s_sntp_synced != 0u || app_wall_clock_valid() != 0u) {
                 s_ntp_synced = 1u;
